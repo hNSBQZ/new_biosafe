@@ -16,7 +16,7 @@
 
 建议提交：`chore: bootstrap biosafe web assistant`、`feat(ragflow): add versioned API adapter contract`。
 
-## Phase 1 - SQLite 与 Excel 种子（IN_PROGRESS）
+## Phase 1 - SQLite 与 Excel 种子（DONE）
 
 - 实现单库迁移、`chat_history`、`admin_user`、`experiment_dataset_binding` repository。
 - 实现幂等 Excel 导入及 84 行映射校验，输出统计但不打印完整敏感内容。
@@ -27,7 +27,7 @@
 
 建议提交：`feat(history): add simple sqlite history store and seed importer`。
 
-## Phase 2 - 简化文本查询链路（TODO）
+## Phase 2 - 简化文本查询链路（IN_PROGRESS）
 
 - 移植并测试 FuncCall detector 与实验提示词存储。
 - 实现严格 direct/NEED_RAG 决定，不引入槽位、名录或改写。
