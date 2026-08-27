@@ -20,12 +20,14 @@ class RAGFlowError(RuntimeError):
 class RAGFlowClient:
     def __init__(self, config: RAGFlowConfig, transport: httpx.AsyncBaseTransport | None = None):
         self.config = config
-        self._client = httpx.AsyncClient(
-            base_url=config.base_url,
-            headers={"Authorization": f"Bearer {config.api_key}"},
-            timeout=config.timeout_seconds,
-            transport=transport,
-        )
+        self._client: httpx.AsyncClient | None = None
+        if config.ready:
+            self._client = httpx.AsyncClient(
+                base_url=config.base_url,
+                headers={"Authorization": f"Bearer {config.api_key}"},
+                timeout=config.timeout_seconds,
+                transport=transport,
+            )
 
     async def __aenter__(self) -> RAGFlowClient:
         return self
@@ -34,7 +36,8 @@ class RAGFlowClient:
         await self.close()
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
 
     async def health(self) -> bool:
         try:
@@ -89,6 +92,8 @@ class RAGFlowClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         if not self.config.ready:
+            raise RAGFlowError("ragflow_not_configured", "RAGFlow is not configured")
+        if self._client is None:
             raise RAGFlowError("ragflow_not_configured", "RAGFlow is not configured")
         try:
             response = await self._client.request(method, path, **kwargs)

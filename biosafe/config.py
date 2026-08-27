@@ -82,6 +82,7 @@ class AdminConfig:
 class Settings:
     environment: str = "development"
     database_path: Path = Path("data/biosafe.db")
+    experiments_dir: Path = Path("experiments")
     log_level: str = "INFO"
     cors_origins: tuple[str, ...] = ("http://localhost:5173",)
     ragflow: RAGFlowConfig = field(default_factory=RAGFlowConfig)
@@ -96,6 +97,7 @@ class Settings:
         return cls(
             environment=_value(source, "BIOSAFE_ENV", "development"),
             database_path=Path(_value(source, "BIOSAFE_DATABASE_PATH", "data/biosafe.db")),
+            experiments_dir=Path(_value(source, "BIOSAFE_EXPERIMENTS_DIR", "experiments")),
             log_level=_value(source, "BIOSAFE_LOG_LEVEL", "INFO").upper(),
             cors_origins=_csv(source, "BIOSAFE_CORS_ORIGINS", ("http://localhost:5173",)),
             ragflow=RAGFlowConfig(

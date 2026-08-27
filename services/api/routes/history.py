@@ -11,7 +11,7 @@ Repository = Annotated[HistoryRepository, Depends(get_history_repository)]
 
 
 @router.get("", response_model=HistoryPage)
-def list_history(
+async def list_history(
     repository: Repository,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -30,7 +30,7 @@ def list_history(
 
 
 @router.get("/{history_id}", response_model=HistoryItem)
-def get_history(history_id: int, repository: Repository) -> HistoryItem:
+async def get_history(history_id: int, repository: Repository) -> HistoryItem:
     item = repository.get(history_id)
     if item is None:
         raise HTTPException(status_code=404, detail={"code": "history_not_found"})
@@ -38,7 +38,7 @@ def get_history(history_id: int, repository: Repository) -> HistoryItem:
 
 
 @router.patch("/{history_id}/correction", response_model=HistoryItem)
-def update_correction(
+async def update_correction(
     history_id: int, payload: CorrectionRequest, repository: Repository
 ) -> HistoryItem:
     item = repository.update_correction(history_id, payload.corrected_answer)

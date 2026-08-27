@@ -26,6 +26,7 @@ class ReferenceSnapshot:
     content: str = ""
     page_numbers: list[int] = field(default_factory=list)
     positions: list[Any] = field(default_factory=list)
+    image_id: str | None = None
     similarity: float | None = None
     vector_similarity: float | None = None
     term_similarity: float | None = None

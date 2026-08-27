@@ -1,14 +1,16 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+import httpx
+import pytest
 
 from biosafe.config import Settings
 from biosafe.domain.history import HistoryCreate
 from services.api.app import create_app
 
 
-def test_history_page_detail_and_correction(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_history_page_detail_and_correction(tmp_path: Path) -> None:
     app = create_app(Settings(database_path=tmp_path / "api.db"))
     created = app.state.history_repository.create(
         HistoryCreate(
@@ -23,13 +25,13 @@ def test_history_page_detail_and_correction(tmp_path: Path) -> None:
             references=[{"chunk_id": "chunk-1"}],
         )
     )
-    client = TestClient(app)
-
-    listing = client.get("/api/history", params={"page": 1, "page_size": 10})
-    detail = client.get(f"/api/history/{created.id}")
-    correction = client.patch(
-        f"/api/history/{created.id}/correction", json={"corrected_answer": "人工纠错"}
-    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        listing = await client.get("/api/history", params={"page": 1, "page_size": 10})
+        detail = await client.get(f"/api/history/{created.id}")
+        correction = await client.patch(
+            f"/api/history/{created.id}/correction", json={"corrected_answer": "人工纠错"}
+        )
 
     assert listing.status_code == 200
     assert listing.json()["total"] == 1
@@ -39,8 +41,13 @@ def test_history_page_detail_and_correction(tmp_path: Path) -> None:
     assert correction.json()["correction_updated_at"] is not None
 
 
-def test_missing_history_returns_stable_404(tmp_path: Path) -> None:
-    client = TestClient(create_app(Settings(database_path=tmp_path / "api.db")))
-    response = client.get("/api/history/999")
+@pytest.mark.asyncio
+async def test_missing_history_returns_stable_404(tmp_path: Path) -> None:
+    transport = httpx.ASGITransport(
+        app=create_app(Settings(database_path=tmp_path / "api.db"))
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/history/999")
+
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "history_not_found"
