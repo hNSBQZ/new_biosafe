@@ -2,7 +2,7 @@
 
 状态值：`TODO`、`IN_PROGRESS`、`DONE`、`BLOCKED`。任何时刻只允许一个阶段为 `IN_PROGRESS`。
 
-## Phase 0 - 仓库基线与外部契约（IN_PROGRESS）
+## Phase 0 - 仓库基线与外部契约（DONE）
 
 目标：建立可运行骨架和确定性契约，避免在错误的 RAGFlow/旧服务假设上开发。
 
@@ -16,7 +16,7 @@
 
 建议提交：`chore: bootstrap biosafe web assistant`、`feat(ragflow): add versioned API adapter contract`。
 
-## Phase 1 - SQLite 与 Excel 种子（TODO）
+## Phase 1 - SQLite 与 Excel 种子（IN_PROGRESS）
 
 - 实现单库迁移、`chat_history`、`admin_user`、`experiment_dataset_binding` repository。
 - 实现幂等 Excel 导入及 84 行映射校验，输出统计但不打印完整敏感内容。
@@ -92,4 +92,3 @@
 - 每完成一个验收门槛立即更新状态、写进度文档并提交，不等到最后统一处理。
 - 遇到 RAGFlow/ASR/TTS 临时不可用，先完成 mock contract 和其他不依赖工作，再重试 live smoke；真实外部验证未通过时阶段不能标 DONE。
 - 不修改旧仓库，不提交 demand/Excel/.env，不操作非 `biosafe-dev-` 远端资源。
-
