@@ -27,7 +27,7 @@
 
 建议提交：`feat(history): add simple sqlite history store and seed importer`。
 
-## Phase 2 - 简化文本查询链路（IN_PROGRESS）
+## Phase 2 - 简化文本查询链路（DONE）
 
 - 移植并测试 FuncCall detector 与实验提示词存储。
 - 实现严格 direct/NEED_RAG 决定，不引入槽位、名录或改写。
