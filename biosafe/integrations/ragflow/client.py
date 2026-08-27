@@ -120,7 +120,9 @@ class RAGFlowClient:
     @staticmethod
     def _document(dataset_id: str, item: dict[str, Any]) -> Document:
         return Document(
-            id=str(item.get("id", "")), dataset_id=dataset_id, name=str(item.get("name", "")),
+            id=str(item.get("id", "")),
+            dataset_id=dataset_id,
+            name=str(item.get("name", "")),
             status=str(item.get("status") or item.get("run") or "unknown"),
             chunk_count=int(item.get("chunk_count") or item.get("chunk_num") or 0),
             progress=float(item["progress"]) if item.get("progress") is not None else None,
@@ -146,7 +148,8 @@ class RAGFlowClient:
             content=str(item.get("content") or item.get("content_with_weight") or ""),
             page_numbers=tuple(int(page) for page in pages if str(page).isdigit()),
             positions=tuple(positions if isinstance(positions, list) else [positions]),
-            image_id=item.get("image_id"), similarity=_optional_float(item.get("similarity")),
+            image_id=item.get("image_id"),
+            similarity=_optional_float(item.get("similarity")),
             vector_similarity=_optional_float(item.get("vector_similarity")),
             term_similarity=_optional_float(item.get("term_similarity")),
             source_url=item.get("source_url") or metadata.get("source_url"),
