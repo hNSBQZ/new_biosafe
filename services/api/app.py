@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,11 +12,21 @@ from biosafe import __version__
 from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.query_service import QueryService
 from biosafe.config import Settings
+from biosafe.integrations.asr import ASRClient
 from biosafe.integrations.llm import OpenAIChatClient
 from biosafe.integrations.ragflow import RAGFlowClient
+from biosafe.integrations.tts import TTSClient
 from biosafe.logging import configure_logging
 from biosafe.storage import BindingRepository, Database, HistoryRepository
-from services.api.routes import chat, experiments, history
+from services.api.routes import audio, chat, experiments, history
+from services.audio import AudioPipeline
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    await app.state.ragflow_client.close()
+    await app.state.tts_client.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -21,7 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(resolved.log_level)
     database = Database(resolved.database_path)
     database.migrate()
-    app = FastAPI(title="Biosafe Assistant API", version=__version__)
+    app = FastAPI(title="Biosafe Assistant API", version=__version__, lifespan=_lifespan)
     app.state.settings = resolved
     app.state.database = database
     app.state.history_repository = HistoryRepository(database)
@@ -29,6 +42,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.experiment_prompt_store = ExperimentPromptStore(resolved.experiments_dir)
     app.state.llm_client = OpenAIChatClient(resolved.llm)
     app.state.ragflow_client = RAGFlowClient(resolved.ragflow)
+    app.state.asr_client = ASRClient(resolved.asr)
+    app.state.tts_client = TTSClient(resolved.tts)
     app.state.query_service = QueryService(
         history_repository=app.state.history_repository,
         binding_repository=app.state.binding_repository,
@@ -36,6 +51,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         llm_client=app.state.llm_client,
         ragflow_client=app.state.ragflow_client,
         default_dataset_ids=resolved.ragflow.dataset_ids,
+    )
+    app.state.audio_pipeline = AudioPipeline(
+        asr_client=app.state.asr_client,
+        tts_client=app.state.tts_client,
+        query_service=app.state.query_service,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -50,6 +70,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "service": "biosafe-api", "version": __version__}
 
     app.include_router(chat.router)
+    app.include_router(audio.router)
     app.include_router(experiments.router)
     app.include_router(history.router)
     return app

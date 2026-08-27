@@ -57,6 +57,10 @@ class ASRConfig:
     connect_timeout: float = 10.0
     recognize_timeout: float = 60.0
 
+    @property
+    def ready(self) -> bool:
+        return bool(self.uri)
+
 
 @dataclass(frozen=True)
 class TTSConfig:
@@ -68,6 +72,10 @@ class TTSConfig:
     max_concurrent: int = 2
     max_retries: int = 1
     retry_base_delay: float = 0.25
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.base_url and self.model and self.voice)
 
 
 @dataclass(frozen=True)
@@ -124,6 +132,8 @@ class Settings:
                 response_format=_value(source, "TTS_RESPONSE_FORMAT", "pcm"),
                 timeout=_float(source, "TTS_TIMEOUT", 60.0),
                 max_concurrent=_integer(source, "TTS_MAX_CONCURRENT", 2),
+                max_retries=_integer(source, "TTS_MAX_RETRIES", 1),
+                retry_base_delay=_float(source, "TTS_RETRY_BASE_DELAY", 0.25),
             ),
             admin=AdminConfig(
                 username=_value(source, "BIOSAFE_ADMIN_USERNAME", "admin"),

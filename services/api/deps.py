@@ -4,6 +4,7 @@ from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.query_service import QueryService
 from biosafe.storage.admin_repository import BindingRepository
 from biosafe.storage.history_repository import HistoryRepository
+from services.audio import AudioPipeline
 
 
 async def get_history_repository(request: Request) -> HistoryRepository:
@@ -20,3 +21,7 @@ async def get_experiment_prompt_store(request: Request) -> ExperimentPromptStore
 
 async def get_query_service(request: Request) -> QueryService:
     return request.app.state.query_service
+
+
+async def get_audio_pipeline(request: Request) -> AudioPipeline:
+    return request.app.state.audio_pipeline
