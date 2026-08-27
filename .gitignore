@@ -3,6 +3,7 @@
 !.env.example
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -11,6 +12,9 @@ htmlcov/
 .venv/
 node_modules/
 dist/
+*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
 logs/
 data/
 *.db
@@ -20,4 +24,3 @@ data/
 # The original request contains a live credential. Keep local-only inputs out of Git.
 demand.txt
 answer_evaluation_results_with_original_answer.xlsx
-

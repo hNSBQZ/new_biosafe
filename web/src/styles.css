@@ -1,0 +1,37 @@
+:root {
+  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color: #18201d;
+  background: #f4f6f5;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, textarea, select { font: inherit; }
+.app-shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+.sidebar { color: #f9fbfa; background: #173c32; padding: 24px 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; margin: 0 8px 32px; }
+.brand svg { width: 22px; color: #7fd3ae; }
+nav { display: grid; gap: 4px; }
+nav a { display: flex; align-items: center; gap: 12px; color: #c8d8d2; text-decoration: none; padding: 11px 12px; border-radius: 6px; }
+nav a.active, nav a:hover { background: #285447; color: white; }
+nav svg { width: 18px; }
+main { min-width: 0; display: flex; flex-direction: column; }
+header { height: 92px; padding: 18px 32px; border-bottom: 1px solid #dce3df; background: white; display: flex; justify-content: space-between; align-items: center; }
+.eyebrow { margin: 0 0 4px; color: #65716d; font-size: 12px; }
+h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+.status { display: flex; align-items: center; gap: 8px; color: #456059; font-size: 13px; }
+.status i { width: 8px; height: 8px; border-radius: 50%; background: #2ca06c; }
+.empty-state { flex: 1; min-height: 420px; display: grid; place-content: center; text-align: center; color: #68736f; padding: 32px; }
+.empty-state svg { margin: 0 auto 14px; width: 32px; height: 32px; color: #348264; }
+.empty-state h2 { color: #27322e; font-size: 18px; margin: 0 0 8px; letter-spacing: 0; }
+.empty-state p { margin: 0; font-size: 14px; }
+@media (max-width: 720px) {
+  .app-shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .sidebar { padding: 14px 16px; display: flex; align-items: center; gap: 12px; overflow-x: auto; }
+  .brand { margin: 0 auto 0 0; white-space: nowrap; }
+  nav { display: flex; }
+  nav a { padding: 9px; }
+  nav a span { display: none; }
+  header { height: 80px; padding: 14px 18px; }
+}
