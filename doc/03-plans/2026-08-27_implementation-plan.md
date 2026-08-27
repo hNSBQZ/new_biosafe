@@ -40,7 +40,7 @@
 
 建议提交：`feat(chat): implement instruction direct and ragflow query paths`。
 
-## Phase 3 - 实时语音链路（IN_PROGRESS）
+## Phase 3 - 实时语音链路（BLOCKED）
 
 - 移植 ASR、TTS client 和必要的文本规范化/有序发送逻辑。
 - WebSocket 编排复用 QueryService；实现会话状态、取消、超时、重录和 TTS 失败文本保留。
