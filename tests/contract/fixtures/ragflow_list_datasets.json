@@ -1,0 +1,11 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "dataset-fixture-id",
+      "name": "fixture-dataset",
+      "chunk_method": "naive",
+      "document_count": 1
+    }
+  ]
+}

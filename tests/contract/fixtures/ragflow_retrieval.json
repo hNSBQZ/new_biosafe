@@ -1,0 +1,19 @@
+{
+  "code": 0,
+  "data": {
+    "chunks": [
+      {
+        "id": "chunk-fixture-id",
+        "dataset_id": "dataset-fixture-id",
+        "dataset_name": "fixture-dataset",
+        "document_id": "document-fixture-id",
+        "document_name": "fixture.txt",
+        "content": "A verifiable fixture chunk.",
+        "page_numbers": [1],
+        "similarity": 0.91,
+        "vector_similarity": 0.89,
+        "term_similarity": 0.72
+      }
+    ]
+  }
+}
