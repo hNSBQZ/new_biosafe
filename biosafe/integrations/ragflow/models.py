@@ -12,6 +12,10 @@ class Dataset:
     name: str
     chunk_method: str = "naive"
     document_count: int = 0
+    embedding_model: str = ""
+    permission: str = ""
+    status: str = ""
+    parser_config: dict[str, Any] = field(default_factory=dict, repr=False)
     raw_metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -24,6 +28,10 @@ class Document:
     chunk_count: int = 0
     progress: float | None = None
     progress_message: str = ""
+    location: str = ""
+    size: int = 0
+    source_type: str = ""
+    document_type: str = ""
     raw_metadata: dict[str, Any] = field(default_factory=dict, repr=False)
 
 

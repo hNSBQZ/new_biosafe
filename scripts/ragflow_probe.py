@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 
-from biosafe.config import Settings
-from biosafe.integrations.ragflow import RAGFlowClient
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from biosafe.config import Settings  # noqa: E402
+from biosafe.integrations.ragflow import RAGFlowClient  # noqa: E402
 
 
 async def main() -> int:

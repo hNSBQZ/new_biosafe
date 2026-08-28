@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -46,27 +47,147 @@ class RAGFlowClient:
         except RAGFlowError:
             return False
 
-    async def list_datasets(self, page: int = 1, page_size: int = 100) -> list[Dataset]:
+    async def list_datasets(
+        self,
+        page: int = 1,
+        page_size: int = 100,
+        *,
+        name: str | None = None,
+        dataset_id: str | None = None,
+        include_parsing_status: bool | None = None,
+    ) -> list[Dataset]:
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if name is not None:
+            params["name"] = name
+        if dataset_id is not None:
+            params["id"] = dataset_id
+        if include_parsing_status is not None:
+            params["include_parsing_status"] = "true" if include_parsing_status else "false"
         data = await self._request(
-            "GET", "/api/v1/datasets", params={"page": page, "page_size": page_size}
+            "GET",
+            "/api/v1/datasets",
+            params=params,
         )
         items = data.get("data", data) if isinstance(data, dict) else data
         if isinstance(items, dict):
             items = items.get("datasets", items.get("items", []))
         return [self._dataset(item) for item in items or []]
 
+    async def create_dataset(
+        self,
+        name: str,
+        *,
+        chunk_method: str | None = None,
+        parser_config: dict[str, Any] | None = None,
+        embedding_model: str | None = None,
+        permission: str | None = None,
+        avatar: str | None = None,
+        description: str | None = None,
+        parse_type: int | None = None,
+        pipeline_id: str | None = None,
+    ) -> Dataset:
+        payload: dict[str, Any] = {"name": name}
+        if chunk_method is not None:
+            payload["chunk_method"] = chunk_method
+        if parser_config is not None:
+            payload["parser_config"] = parser_config
+        if embedding_model is not None:
+            payload["embedding_model"] = embedding_model
+        if permission is not None:
+            payload["permission"] = permission
+        if avatar is not None:
+            payload["avatar"] = avatar
+        if description is not None:
+            payload["description"] = description
+        if parse_type is not None:
+            payload["parse_type"] = parse_type
+        if pipeline_id is not None:
+            payload["pipeline_id"] = pipeline_id
+        data = await self._request("POST", "/api/v1/datasets", json=payload)
+        body = data.get("data", data) if isinstance(data, dict) else data
+        if not isinstance(body, dict):
+            raise RAGFlowError("ragflow_api_error", "RAGFlow dataset response was invalid")
+        return self._dataset(body)
+
+    async def delete_owned_dataset(self, dataset_id: str) -> None:
+        await self._request("DELETE", "/api/v1/datasets", json={"ids": [dataset_id]})
+
     async def list_documents(
-        self, dataset_id: str, page: int = 1, page_size: int = 100
+        self,
+        dataset_id: str,
+        page: int = 1,
+        page_size: int = 100,
+        *,
+        keywords: str | None = None,
+        document_id: str | None = None,
+        name: str | None = None,
+        run: str | None = None,
+        suffix: str | None = None,
     ) -> list[Document]:
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if keywords is not None:
+            params["keywords"] = keywords
+        if document_id is not None:
+            params["id"] = document_id
+        if name is not None:
+            params["name"] = name
+        if run is not None:
+            params["run"] = run
+        if suffix is not None:
+            params["suffix"] = suffix
         data = await self._request(
             "GET",
             f"/api/v1/datasets/{dataset_id}/documents",
-            params={"page": page, "page_size": page_size},
+            params=params,
         )
         items = data.get("data", data) if isinstance(data, dict) else data
         if isinstance(items, dict):
             items = items.get("docs", items.get("documents", items.get("items", [])))
         return [self._document(dataset_id, item) for item in items or []]
+
+    async def upload_document(
+        self,
+        dataset_id: str,
+        file_path: str | Path,
+        *,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> list[Document]:
+        path = Path(file_path)
+        guessed_name = filename or path.name
+        guessed_type = content_type or _guess_content_type(path)
+        data = path.read_bytes()
+        files = [("file", (guessed_name, data, guessed_type))]
+        response = await self._request(
+            "POST",
+            f"/api/v1/datasets/{dataset_id}/documents",
+            files=files,
+        )
+        items = response.get("data", response) if isinstance(response, dict) else response
+        return [self._document(dataset_id, item) for item in items or []]
+
+    async def delete_owned_document(self, dataset_id: str, document_id: str) -> None:
+        await self._request(
+            "DELETE",
+            f"/api/v1/datasets/{dataset_id}/documents",
+            json={"ids": [document_id]},
+        )
+
+    async def start_parse(self, dataset_id: str, document_ids: list[str] | tuple[str, ...]) -> None:
+        await self._request(
+            "POST",
+            f"/api/v1/datasets/{dataset_id}/chunks",
+            json={"document_ids": list(document_ids)},
+        )
+
+    async def cancel_parse(
+        self, dataset_id: str, document_ids: list[str] | tuple[str, ...]
+    ) -> None:
+        await self._request(
+            "DELETE",
+            f"/api/v1/datasets/{dataset_id}/chunks",
+            json={"document_ids": list(document_ids)},
+        )
 
     async def retrieve(
         self,
@@ -119,6 +240,14 @@ class RAGFlowClient:
             name=str(item.get("name", "")),
             chunk_method=str(item.get("chunk_method") or item.get("parser_id") or "naive"),
             document_count=int(item.get("document_count") or item.get("doc_num") or 0),
+            embedding_model=str(item.get("embedding_model") or ""),
+            permission=str(item.get("permission") or ""),
+            status=str(item.get("status") or item.get("run") or ""),
+            parser_config=(
+                item["parser_config"]
+                if isinstance(item.get("parser_config"), dict)
+                else {}
+            ),
             raw_metadata=dict(item),
         )
 
@@ -126,12 +255,16 @@ class RAGFlowClient:
     def _document(dataset_id: str, item: dict[str, Any]) -> Document:
         return Document(
             id=str(item.get("id", "")),
-            dataset_id=dataset_id,
+            dataset_id=str(item.get("dataset_id") or item.get("knowledgebase_id") or dataset_id),
             name=str(item.get("name", "")),
-            status=str(item.get("status") or item.get("run") or "unknown"),
+            status=str(item.get("run") or item.get("status") or "unknown"),
             chunk_count=int(item.get("chunk_count") or item.get("chunk_num") or 0),
             progress=float(item["progress"]) if item.get("progress") is not None else None,
             progress_message=str(item.get("progress_msg") or item.get("progress_message") or ""),
+            location=str(item.get("location") or ""),
+            size=int(item.get("size") or 0),
+            source_type=str(item.get("source_type") or ""),
+            document_type=str(item.get("type") or ""),
             raw_metadata=dict(item),
         )
 
@@ -164,3 +297,16 @@ class RAGFlowClient:
 
 def _optional_float(value: Any) -> float | None:
     return float(value) if value is not None else None
+
+
+def _guess_content_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return "application/pdf"
+    if suffix in {".html", ".htm"}:
+        return "text/html"
+    if suffix in {".txt", ".md", ".rst"}:
+        return "text/plain"
+    if suffix in {".docx"}:
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "application/octet-stream"
