@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Activity,
@@ -172,6 +172,7 @@ export function App() {
   })
   const [historyLoading, setHistoryLoading] = useState(false)
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null)
+  const selectedHistoryIdRef = useRef<number | null>(null)
   const [selectedHistory, setSelectedHistory] = useState<HistoryItem | null>(null)
   const [historyCorrection, setHistoryCorrection] = useState('')
   const [savingCorrection, setSavingCorrection] = useState(false)
@@ -206,8 +207,11 @@ export function App() {
   useEffect(() => {
     void loadHealth()
     void loadExperiments()
-    void loadHistoryPage()
   }, [])
+
+  useEffect(() => {
+    selectedHistoryIdRef.current = selectedHistoryId
+  }, [selectedHistoryId])
 
   useEffect(() => {
     if (!experimentLoaded && experiments.length > 0) {
@@ -215,10 +219,6 @@ export function App() {
       setExperimentLoaded(true)
     }
   }, [experimentLoaded, experiments])
-
-  useEffect(() => {
-    void loadHistoryPage()
-  }, [selectedExperimentId, historyPage, historyPageSize, historyStatusFilter])
 
   useEffect(() => {
     if (!selectedHistoryId && historyPageData.items.length > 0) {
@@ -279,7 +279,7 @@ export function App() {
     }
   }
 
-  async function loadHistoryPage() {
+  const loadHistoryPage = useCallback(async () => {
     setHistoryLoading(true)
     try {
       const params = new URLSearchParams()
@@ -298,7 +298,7 @@ export function App() {
       const payload = (await response.json()) as HistoryPage
       setHistoryPageData(payload)
       if (payload.items.length > 0) {
-        const stillVisible = payload.items.some((item) => item.id === selectedHistoryId)
+        const stillVisible = payload.items.some((item) => item.id === selectedHistoryIdRef.current)
         if (!stillVisible) {
           setSelectedHistoryId(payload.items[0].id)
         }
@@ -312,7 +312,11 @@ export function App() {
     } finally {
       setHistoryLoading(false)
     }
-  }
+  }, [historyPage, historyPageSize, historyStatusFilter, selectedExperimentId])
+
+  useEffect(() => {
+    void loadHistoryPage()
+  }, [loadHistoryPage])
 
   async function loadHistoryDetail(historyId: number) {
     try {
