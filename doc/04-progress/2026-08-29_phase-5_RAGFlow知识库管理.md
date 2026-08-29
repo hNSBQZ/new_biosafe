@@ -1,0 +1,36 @@
+# Phase 5 - RAGFlow 知识库管理
+
+- 状态：DONE
+- 范围：
+  - 管理员登录、Bearer token 校验和 `biosafe-dev-` 命名空间保护。
+  - RAGFlow 数据集/文档列表、上传、解析、重试、取消、删除和检索预览。
+  - 网页系统页内的知识库管理面板，包含登录、数据集、文档状态和预览。
+  - 真实 RAGFlow live smoke 脚本，验证创建 -> 上传 -> 解析 -> 取消 -> 检索预览 -> 删除。
+- 关键设计：
+  - 管理写操作先确认目标 dataset 属于 `biosafe-dev-` 命名空间，再调用 RAGFlow 写接口。
+  - `list_datasets` 只展示 dev 命名空间，前端不暴露非本任务资源。
+  - 管理 UI 复用现有系统页，不新增独立路由；token 只保存在本地浏览器存储。
+  - RAGFlow 仍是知识库和文档状态的事实来源，本地 SQLite 不复制远端元数据。
+- 实际变更：
+  - `1529ad1 feat(admin): manage ragflow datasets and documents`
+  - 新增 `biosafe/auth.py`、`services/api/routes/admin.py`、`web/src/KnowledgeAdminPanel.tsx`、`scripts/ragflow_admin_smoke.py`。
+  - `services/api/app.py`、`services/api/schemas.py`、`web/src/App.tsx`、`web/src/styles.css`、`tests/integration/test_admin_api.py`、`tests/unit/test_auth.py` 同步更新。
+- 数据或接口兼容性：
+  - 不改文本问答或语音协议。
+  - 不新增本地检索、重排或知识库镜像表。
+  - 管理 token 和 RAGFlow API key 仅从环境变量读取，不写入文档或日志。
+- 验证命令与真实结果：
+  - `conda run -n biosafe python -m ruff check biosafe services scripts tests`：通过，`All checks passed!`
+  - `conda run -n biosafe python -m pytest tests/unit/test_auth.py tests/integration/test_admin_api.py tests/contract/test_ragflow_client.py`：8 passed。
+  - `npm --prefix web test -- --run`：3 passed。
+  - `npm --prefix web run build`：通过。
+  - `conda run -n biosafe python scripts/ragflow_admin_smoke.py`：通过，创建 `biosafe-dev-admin-20260829091154`，3 个文档均处理完成，`cancel_fixture.html` 为 `CANCEL`，检索返回 8 个 chunks，所有临时资源已删除。
+- 外部服务验证：
+  - 远端 RAGFlow 成功创建并删除 `af50531ea38911f1adce556d4f780165`。
+  - 上传 `病原微生物实验室生物安全管理条例.html`、`中国首个P4实验室正式运行.html` 和本地生成的取消样本后，前两篇解析为 `DONE`，取消样本为 `CANCEL`。
+  - 检索预览对 `P4实验室穿什么防护服，需要戴口罩吗` 返回 8 个片段。
+- 提交：`1529ad1 feat(admin): manage ragflow datasets and documents`
+- 遗留问题：
+  - 最终部署说明、Playwright E2E 和总验收仍在 Phase 6。
+- 下一阶段入口：
+  - 进入 Phase 6 的部署和最终验收收口。

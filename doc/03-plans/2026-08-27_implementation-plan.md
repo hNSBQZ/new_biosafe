@@ -40,16 +40,16 @@
 
 建议提交：`feat(chat): implement instruction direct and ragflow query paths`。
 
-## Phase 3 - 实时语音链路（BLOCKED）
+## Phase 3 - 实时语音链路（DONE）
 
 - 移植 ASR、TTS client 和必要的文本规范化/有序发送逻辑。
 - WebSocket 编排复用 QueryService；实现会话状态、取消、超时、重录和 TTS 失败文本保留。
 - 固定音频格式/采样率协议并提供浏览器兼容路径。
-- 写 contract/integration tests 和 Phase 3 记录并提交。
+- 写 contract/integration tests、Live smoke 和 Phase 3 记录并提交。
 
 验收：录制样例完成 ASR -> direct/RAG -> TTS；中断与各服务失败用例不会产生悬挂任务。
 
-建议提交：`feat(voice): add browser audio conversation pipeline`。
+建议提交：`feat(voice): add browser audio conversation pipeline`、`test(voice): add live ASR/TTS smoke`。
 
 ## Phase 4 - 网页人工测试端（DONE）
 
@@ -63,12 +63,12 @@
 
 建议提交：`feat(web): build text voice history and citation workspace`。
 
-## Phase 5 - RAGFlow 知识库管理（TODO）
+## Phase 5 - RAGFlow 知识库管理（DONE）
 
-- 后端实现 dataset/document/parse/retry/delete/retrieval preview adapter 与管理员鉴权。
+- 后端实现 dataset/document/parse/retry/delete/retrieval preview adapter 与管理员鉴权，并限制写操作在 `biosafe-dev-` 命名空间。
 - 网页实现解析模板、数据集和文档状态、上传、轮询、失败重试、确认删除、检索预览。
 - live 测试只操作 `biosafe-dev-` 资源，验证异步解析真实状态；不实现本地文档解析。
-- 写 Phase 5 记录并提交。
+- 写 Phase 5 记录、测试报告并提交。
 
 验收：至少用一个小 fixture 完成开发数据集创建 -> 上传 -> 解析 -> 检索预览 -> 删除；非 owned 资源删除被拒绝。
 
