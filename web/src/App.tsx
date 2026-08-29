@@ -14,10 +14,10 @@ import {
   Send,
   Settings2,
   Square,
-  TriangleAlert,
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { KnowledgeAdminPanel } from './KnowledgeAdminPanel'
 
 type ViewKey = 'assistant' | 'history' | 'system'
 type TurnInputMode = 'text' | 'voice'
@@ -1426,43 +1426,42 @@ export function App() {
             )}
 
             {view === 'system' && (
-              <section className="panel">
-                <div className="panel-header">
-                  <div>
-                    <p className="panel-kicker">系统</p>
-                    <h2>运行状态</h2>
+              <div className="stack">
+                <section className="panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-kicker">系统</p>
+                      <h2>运行状态</h2>
+                    </div>
+                    <Pill tone={health?.status === 'ok' ? 'success' : 'danger'}>
+                      {health?.status ?? 'unknown'}
+                    </Pill>
                   </div>
-                  <Pill tone={health?.status === 'ok' ? 'success' : 'danger'}>
-                    {health?.status ?? 'unknown'}
-                  </Pill>
-                </div>
-                <div className="system-grid">
-                  <div className="mini-panel">
-                    <span className="mini-label">后端</span>
-                    <strong>{health?.service ?? 'biosafe-api'}</strong>
-                    <p>{health?.version ?? 'unknown'}</p>
+                  <div className="system-grid">
+                    <div className="mini-panel">
+                      <span className="mini-label">后端</span>
+                      <strong>{health?.service ?? 'biosafe-api'}</strong>
+                      <p>{health?.version ?? 'unknown'}</p>
+                    </div>
+                    <div className="mini-panel">
+                      <span className="mini-label">实验</span>
+                      <strong>{experiments.length}</strong>
+                      <p>已加载实验场景</p>
+                    </div>
+                    <div className="mini-panel">
+                      <span className="mini-label">历史</span>
+                      <strong>{historyPageData.total}</strong>
+                      <p>当前筛选结果</p>
+                    </div>
+                    <div className="mini-panel">
+                      <span className="mini-label">语音</span>
+                      <strong>{supportedVoice ? '可用' : '受限'}</strong>
+                      <p>{voicePhase}</p>
+                    </div>
                   </div>
-                  <div className="mini-panel">
-                    <span className="mini-label">实验</span>
-                    <strong>{experiments.length}</strong>
-                    <p>已加载实验场景</p>
-                  </div>
-                  <div className="mini-panel">
-                    <span className="mini-label">历史</span>
-                    <strong>{historyPageData.total}</strong>
-                    <p>当前筛选结果</p>
-                  </div>
-                  <div className="mini-panel">
-                    <span className="mini-label">语音</span>
-                    <strong>{supportedVoice ? '可用' : '受限'}</strong>
-                    <p>{voicePhase}</p>
-                  </div>
-                </div>
-                <div className="note-row">
-                  <TriangleAlert aria-hidden="true" />
-                  <span>知识库管理入口保留到下一阶段。</span>
-                </div>
-              </section>
+                </section>
+                <KnowledgeAdminPanel onNotice={setGlobalNotice} />
+              </div>
             )}
           </section>
 

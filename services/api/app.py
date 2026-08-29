@@ -11,14 +11,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from biosafe import __version__
 from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.query_service import QueryService
+from biosafe.auth import hash_password
 from biosafe.config import Settings
 from biosafe.integrations.asr import ASRClient
 from biosafe.integrations.llm import OpenAIChatClient
 from biosafe.integrations.ragflow import RAGFlowClient
 from biosafe.integrations.tts import TTSClient
 from biosafe.logging import configure_logging
-from biosafe.storage import BindingRepository, Database, HistoryRepository
-from services.api.routes import audio, chat, experiments, history
+from biosafe.storage import AdminRepository, BindingRepository, Database, HistoryRepository
+from services.api.routes import admin, audio, chat, experiments, history
 from services.audio import AudioPipeline
 
 
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Biosafe Assistant API", version=__version__, lifespan=_lifespan)
     app.state.settings = resolved
     app.state.database = database
+    app.state.admin_repository = AdminRepository(database)
     app.state.history_repository = HistoryRepository(database)
     app.state.binding_repository = BindingRepository(database)
     app.state.experiment_prompt_store = ExperimentPromptStore(resolved.experiments_dir)
@@ -57,6 +59,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tts_client=app.state.tts_client,
         query_service=app.state.query_service,
     )
+    if resolved.admin.password and resolved.admin.token_secret:
+        app.state.admin_repository.upsert(
+            resolved.admin.username,
+            hash_password(resolved.admin.password),
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(resolved.cors_origins),
@@ -70,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "service": "biosafe-api", "version": __version__}
 
     app.include_router(chat.router)
+    app.include_router(admin.router)
     app.include_router(audio.router)
     app.include_router(experiments.router)
     app.include_router(history.router)

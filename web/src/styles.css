@@ -600,6 +600,146 @@ svg {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.admin-workbench {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-title h2 {
+  margin: 2px 0 0;
+  font-size: 18px;
+}
+
+.admin-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dbe4df;
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.admin-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.admin-list-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.admin-list-row.active .admin-list-main {
+  border-color: #79b996;
+  box-shadow: 0 0 0 1px rgba(52, 130, 100, 0.08) inset;
+}
+
+.admin-list-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #dbe4df;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #25322d;
+  text-align: left;
+}
+
+.admin-list-main p,
+.admin-doc-copy p,
+.preview-row p {
+  margin: 0;
+  color: #5e6964;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.admin-list-head,
+.admin-doc-head,
+.preview-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-list-action {
+  align-self: center;
+}
+
+.admin-doc-row,
+.preview-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #dbe4df;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.admin-doc-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.admin-doc-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.admin-preview {
+  display: grid;
+  gap: 12px;
+}
+
+.preview-list {
+  display: grid;
+  gap: 8px;
+}
+
+.preview-row-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #65726d;
+}
+
+.empty-state.compact {
+  min-height: 120px;
+  padding: 16px 12px;
+}
+
+.admin-error {
+  margin-top: 4px;
+}
+
 .segment-strip {
   display: flex;
   flex-wrap: wrap;

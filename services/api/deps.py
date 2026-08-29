@@ -2,7 +2,7 @@ from fastapi import Request
 
 from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.query_service import QueryService
-from biosafe.storage.admin_repository import BindingRepository
+from biosafe.storage.admin_repository import AdminRepository, BindingRepository
 from biosafe.storage.history_repository import HistoryRepository
 from services.audio import AudioPipeline
 
@@ -13,6 +13,10 @@ async def get_history_repository(request: Request) -> HistoryRepository:
 
 async def get_binding_repository(request: Request) -> BindingRepository:
     return request.app.state.binding_repository
+
+
+async def get_admin_repository(request: Request) -> AdminRepository:
+    return request.app.state.admin_repository
 
 
 async def get_experiment_prompt_store(request: Request) -> ExperimentPromptStore:
