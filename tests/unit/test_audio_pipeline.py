@@ -118,6 +118,7 @@ async def test_audio_pipeline_uses_voice_query_and_sends_tts_audio() -> None:
         asr_client=asr,
         tts_client=tts,
         query_service=query,
+        tts_sample_rate=22_050,
     )  # type: ignore[arg-type]
     session = AudioSession(
         session_id="s1",
@@ -140,6 +141,9 @@ async def test_audio_pipeline_uses_voice_query_and_sends_tts_audio() -> None:
         if message["type"] == "audio_stream" and message["event"] == "data"
     )
     assert base64.b64decode(audio_message["data"]) == b"pcm-0"
+    assert audio_message["format"] == "pcm_s16le"
+    assert audio_message["sample_rate"] == 22_050
+    assert audio_message["channels"] == 1
     assert tts.texts == ["BSL三级实验室进行。", "注意零点一毫升。"]
     finished = [message for message in messages if message["type"] == "session_complete"][-1]
     assert finished["reason"] == "done"
@@ -179,6 +183,13 @@ async def test_audio_pipeline_tts_failure_keeps_text_answer() -> None:
         if message["type"] == "audio_stream" and message["event"] == "finished"
     )
     assert finished_audio["tts_success"] is False
+    skipped = next(
+        message
+        for message in messages
+        if message["type"] == "audio_stream" and message["event"] == "skipped"
+    )
+    assert skipped["sequence"] == 0
+    assert skipped["code"] == "tts_failed"
     assert not [
         message
         for message in messages

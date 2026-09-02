@@ -23,10 +23,12 @@ class AudioPipeline:
         asr_client: ASRProtocol,
         tts_client: TTSProtocol,
         query_service: QueryService,
+        tts_sample_rate: int = 24_000,
     ):
         self._asr = asr_client
         self._tts = tts_client
         self._query_service = query_service
+        self._tts_sample_rate = tts_sample_rate
 
     async def process_audio(
         self,
@@ -163,7 +165,7 @@ class AudioPipeline:
         sender: AudioMessageSender,
     ) -> None:
         await _send_status(sender, "tts_started", "正在合成语音")
-        audio_sender = OrderedAudioSender(sender)
+        audio_sender = OrderedAudioSender(sender, sample_rate=self._tts_sample_rate)
         splitter = SentenceSplitter()
         segments = splitter.feed(answer) + splitter.flush()
         for segment in segments:
@@ -184,6 +186,9 @@ class AudioPipeline:
                 "history_id": outcome.get("history_id"),
                 "tts_success": stats.success_count > 0,
                 "tts_failure_count": stats.failure_count,
+                "format": "pcm_s16le",
+                "sample_rate": self._tts_sample_rate,
+                "channels": 1,
             }
         )
 

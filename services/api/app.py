@@ -58,6 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         asr_client=app.state.asr_client,
         tts_client=app.state.tts_client,
         query_service=app.state.query_service,
+        tts_sample_rate=resolved.tts.sample_rate,
     )
     if resolved.admin.password and resolved.admin.token_secret:
         app.state.admin_repository.upsert(

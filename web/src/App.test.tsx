@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 
@@ -215,6 +215,10 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
 
     expect(await screen.findByText('录音不可用')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
+    })
   })
 
   it('keeps knowledge management on its own route', async () => {

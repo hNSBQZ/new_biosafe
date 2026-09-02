@@ -68,6 +68,7 @@ class TTSConfig:
     model: str = ""
     voice: str = ""
     response_format: str = "pcm"
+    sample_rate: int = 24_000
     timeout: float = 60.0
     max_concurrent: int = 2
     max_retries: int = 1
@@ -132,6 +133,7 @@ class Settings:
                 model=_value(source, "TTS_MODEL"),
                 voice=_value(source, "TTS_VOICE"),
                 response_format=_value(source, "TTS_RESPONSE_FORMAT", "pcm"),
+                sample_rate=_integer(source, "TTS_SAMPLE_RATE", 24_000),
                 timeout=_float(source, "TTS_TIMEOUT", 60.0),
                 max_concurrent=_integer(source, "TTS_MAX_CONCURRENT", 2),
                 max_retries=_integer(source, "TTS_MAX_RETRIES", 1),

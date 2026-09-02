@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { KnowledgeAdminPanel } from './KnowledgeAdminPanel'
+import { PcmStreamPlayer, decodeBase64Audio } from './audio/PcmStreamPlayer'
 
 type ViewKey = 'assistant' | 'history' | 'system' | 'knowledge'
 type TurnInputMode = 'text' | 'voice'
@@ -187,11 +188,14 @@ export function App() {
   const [textRequestPending, setTextRequestPending] = useState(false)
   const chatAbortRef = useRef<AbortController | null>(null)
   const voiceSocketRef = useRef<WebSocket | null>(null)
+  const voicePlayerRef = useRef<PcmStreamPlayer | null>(null)
+  const voicePlaybackFailedRef = useRef(false)
   const voiceConnectTimeoutRef = useRef<number | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const voiceChunksRef = useRef<Blob[]>([])
   const voiceCancelRequestedRef = useRef(false)
+  const voiceSessionCompleteReceivedRef = useRef(false)
   const pendingVoiceTurnIdRef = useRef<string | null>(null)
 
   const activeTurn = useMemo(
@@ -475,6 +479,7 @@ export function App() {
     setVoiceMessage('正在连接录音')
     setVoiceTranscript('')
     setVoiceSegments([])
+    voicePlaybackFailedRef.current = false
     const turnId = makeId('voice')
     pendingVoiceTurnIdRef.current = turnId
     setTurns((current) => [
@@ -495,9 +500,18 @@ export function App() {
     ])
     setActiveTurnId(turnId)
     try {
+      const previousPlayer = voicePlayerRef.current
+      voicePlayerRef.current = null
+      if (previousPlayer) {
+        void previousPlayer.stop()
+      }
+      const player = new PcmStreamPlayer()
+      voicePlayerRef.current = player
+      await player.prepare()
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
       voiceCancelRequestedRef.current = false
+      voiceSessionCompleteReceivedRef.current = false
       const mimeType = resolveRecordingMimeType()
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
       recorderRef.current = recorder
@@ -620,13 +634,15 @@ export function App() {
       }
       socket.onclose = () => {
         clearVoiceConnectTimeout()
-        setVoicePhase((current) =>
-          current === 'processing' || current === 'recording' || current === 'connecting'
-            ? 'idle'
-            : current,
-        )
-        if (socketOpened) {
-          setVoiceMessage('录音结束')
+        if (
+          socketOpened &&
+          !voiceCancelRequestedRef.current &&
+          !voiceSessionCompleteReceivedRef.current
+        ) {
+          setVoicePhase('error')
+          setVoiceError('语音连接意外中断')
+          setVoiceMessage('语音连接已中断')
+          void stopVoiceResources()
         }
       }
     } catch (error) {
@@ -705,7 +721,8 @@ export function App() {
       return
     }
     if (type === 'status') {
-      setVoiceMessage(stringValue(message.text) || stringValue(message.phase))
+      const phase = stringValue(message.phase)
+      setVoiceMessage(voiceStatusLabel(phase, stringValue(message.text)))
       return
     }
     if (type === 'packet_ack') {
@@ -765,7 +782,8 @@ export function App() {
       return
     }
     if (type === 'audio_stream') {
-      if (stringValue(message.event) === 'data') {
+      const streamEvent = stringValue(message.event)
+      if (streamEvent === 'data') {
         const sequence = numberValue(message.sequence)
         const text = stringValue(message.text)
         setVoiceSegments((current) => [
@@ -775,9 +793,56 @@ export function App() {
             text,
           },
         ])
+        const player = voicePlayerRef.current
+        if (player) {
+          try {
+            await player.enqueue({
+              sequence,
+              bytes: decodeBase64Audio(stringValue(message.data)),
+              format: stringValue(message.format),
+              sampleRate: numberValue(message.sample_rate),
+              channels: numberValue(message.channels),
+            })
+            setVoiceMessage('正在播放语音')
+          } catch (error) {
+            const detail = `语音播放失败：${describeError(error)}`
+            voicePlaybackFailedRef.current = true
+            setVoiceError(detail)
+            setVoiceMessage('语音播放失败，已保留文字')
+            voicePlayerRef.current = null
+            await player.stop()
+          }
+        }
       }
-      if (stringValue(message.event) === 'finished') {
-        setVoiceMessage('语音输出已完成')
+      if (streamEvent === 'skipped') {
+        await voicePlayerRef.current?.skip(numberValue(message.sequence))
+      }
+      if (streamEvent === 'finished') {
+        const player = voicePlayerRef.current
+        if (player) {
+          try {
+            setVoiceMessage('正在播放语音')
+            await player.finish()
+            if (voicePlayerRef.current === player) {
+              voicePlayerRef.current = null
+              setVoiceMessage(
+                message.tts_success === true
+                  ? '语音输出已完成'
+                  : '语音合成失败，已保留文字',
+              )
+              setVoicePhase('idle')
+            }
+          } catch (error) {
+            if (voicePlayerRef.current === player) {
+              voicePlayerRef.current = null
+              voicePlaybackFailedRef.current = true
+              setVoiceError(`语音播放失败：${describeError(error)}`)
+              setVoiceMessage('语音播放失败，已保留文字')
+              setVoicePhase('idle')
+            }
+            await player.stop()
+          }
+        }
       }
       return
     }
@@ -796,18 +861,21 @@ export function App() {
       return
     }
     if (type === 'session_complete') {
+      voiceSessionCompleteReceivedRef.current = true
       const reason = stringValue(message.reason)
       if (reason === 'interrupted') {
         setVoiceMessage('会话已中断')
       } else if (reason === 'error') {
         setVoiceMessage('会话失败')
-      } else {
+      } else if (!voicePlayerRef.current && !voicePlaybackFailedRef.current) {
         setVoiceMessage('会话已完成')
       }
-      setVoicePhase('idle')
+      if (reason !== 'done' || !voicePlayerRef.current) {
+        setVoicePhase('idle')
+      }
       pendingVoiceTurnIdRef.current = null
       setActiveTurnId(null)
-      stopVoiceResources()
+      await stopVoiceResources(reason !== 'done')
     }
   }
 
@@ -1051,7 +1119,7 @@ export function App() {
     setView(nextView)
   }
 
-  async function stopVoiceResources() {
+  async function stopVoiceResources(stopPlayback = true) {
     clearVoiceConnectTimeout()
     const recorder = recorderRef.current
     recorderRef.current = null
@@ -1067,6 +1135,11 @@ export function App() {
     if (voiceSocketRef.current) {
       voiceSocketRef.current.close()
       voiceSocketRef.current = null
+    }
+    if (stopPlayback && voicePlayerRef.current) {
+      const player = voicePlayerRef.current
+      voicePlayerRef.current = null
+      await player.stop()
     }
   }
 
@@ -1238,23 +1311,39 @@ export function App() {
                     </label>
                   ) : (
                     <div className="voice-composer">
-                      <button
-                        type="button"
-                        className={voicePhase === 'recording' ? 'record-button recording' : 'record-button'}
-                        onClick={() =>
-                          voicePhase === 'idle'
-                            ? void startVoiceSession()
-                            : finishVoiceRecording()
-                        }
-                        disabled={textRequestPending || voicePhase === 'connecting' || voicePhase === 'processing'}
-                        aria-label={voicePhase === 'recording' ? '停止录音' : '开始录音'}
-                      >
-                        {voicePhase === 'recording' ? (
-                          <Square aria-hidden="true" />
-                        ) : (
-                          <Mic aria-hidden="true" />
+                      <div className="voice-actions">
+                        <button
+                          type="button"
+                          className={voicePhase === 'recording' ? 'record-button recording' : 'record-button'}
+                          onClick={() =>
+                            voicePhase === 'idle'
+                              ? void startVoiceSession()
+                              : finishVoiceRecording()
+                          }
+                          disabled={
+                            textRequestPending ||
+                            voicePhase === 'connecting' ||
+                            voicePhase === 'processing'
+                          }
+                          aria-label={voicePhase === 'recording' ? '停止录音' : '开始录音'}
+                        >
+                          {voicePhase === 'recording' ? (
+                            <Square aria-hidden="true" />
+                          ) : (
+                            <Mic aria-hidden="true" />
+                          )}
+                        </button>
+                        {voicePhase !== 'idle' && (
+                          <button
+                            type="button"
+                            className="ghost-button voice-cancel-button"
+                            onClick={() => void stopVoiceSession(true)}
+                          >
+                            <X aria-hidden="true" />
+                            取消
+                          </button>
                         )}
-                      </button>
+                      </div>
                       <div className="voice-status" aria-live="polite">
                         <strong>{voiceMessage}</strong>
                         <span>{voiceError || voiceTranscript || '点击麦克风开始录音'}</span>
@@ -1999,6 +2088,16 @@ function stageLabel(stage: string) {
     cancelled: '已取消',
   }
   return mapping[stage] || stage
+}
+
+function voiceStatusLabel(phase: string, fallback: string) {
+  const labels: Record<string, string> = {
+    recording_started: '正在录音',
+    asr_started: '正在识别语音',
+    query_started: '正在生成回答',
+    tts_started: '正在合成语音',
+  }
+  return labels[phase] || fallback || phase
 }
 
 function historyTone(status: string) {

@@ -60,8 +60,9 @@ class AudioSendStats:
 
 
 class OrderedAudioSender:
-    def __init__(self, sender: AudioMessageSender):
+    def __init__(self, sender: AudioMessageSender, *, sample_rate: int = 24_000):
         self._sender = sender
+        self._sample_rate = sample_rate
         self._next_seq = 0
         self._expected_seq = 0
         self._buffer: dict[int, TTSResult] = {}
@@ -104,6 +105,9 @@ class OrderedAudioSender:
                         "text": item.text,
                         "sequence": item.sequence_id,
                         "phase": "answer",
+                        "format": "pcm_s16le",
+                        "sample_rate": self._sample_rate,
+                        "channels": 1,
                     }
                 )
             else:
@@ -112,6 +116,16 @@ class OrderedAudioSender:
                     "TTS segment failed: seq=%s code=%s",
                     item.sequence_id,
                     item.error_code,
+                )
+                await self._sender(
+                    {
+                        "type": "audio_stream",
+                        "event": "skipped",
+                        "text": item.text,
+                        "sequence": item.sequence_id,
+                        "phase": "answer",
+                        "code": item.error_code or "tts_failed",
+                    }
                 )
             self._expected_seq += 1
 
