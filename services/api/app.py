@@ -32,7 +32,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings.from_env()
-    configure_logging(resolved.log_level)
+    configure_logging(resolved.log_level, resolved.log_file)
     database = Database(resolved.database_path)
     database.migrate()
     app = FastAPI(title="Biosafe Assistant API", version=__version__, lifespan=_lifespan)

@@ -92,6 +92,7 @@ class Settings:
     database_path: Path = Path("data/biosafe.db")
     experiments_dir: Path = Path("experiments")
     log_level: str = "INFO"
+    log_file: Path = Path("logs/biosafe-api.log")
     cors_origins: tuple[str, ...] = ("http://localhost:5173",)
     ragflow: RAGFlowConfig = field(default_factory=RAGFlowConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -107,6 +108,7 @@ class Settings:
             database_path=Path(_value(source, "BIOSAFE_DATABASE_PATH", "data/biosafe.db")),
             experiments_dir=Path(_value(source, "BIOSAFE_EXPERIMENTS_DIR", "experiments")),
             log_level=_value(source, "BIOSAFE_LOG_LEVEL", "INFO").upper(),
+            log_file=Path(_value(source, "BIOSAFE_LOG_FILE", "logs/biosafe-api.log")),
             cors_origins=_csv(source, "BIOSAFE_CORS_ORIGINS", ("http://localhost:5173",)),
             ragflow=RAGFlowConfig(
                 base_url=_value(source, "RAGFLOW_BASE_URL").rstrip("/"),

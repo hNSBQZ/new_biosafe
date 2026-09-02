@@ -6,6 +6,8 @@ import json
 import logging
 import re
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 _SECRET_PATTERN = re.compile(
@@ -49,10 +51,28 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
-def configure_logging(level: str = "INFO") -> None:
-    handler = logging.StreamHandler()
-    handler.setFormatter(JsonFormatter())
+def configure_logging(level: str = "INFO", log_file: Path | str | None = None) -> None:
+    formatter = JsonFormatter()
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    handlers: list[logging.Handler] = [stream_handler]
+    if log_file:
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            path,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
+
     root = logging.getLogger()
+    for existing_handler in root.handlers:
+        existing_handler.close()
     root.handlers.clear()
-    root.addHandler(handler)
+    for handler in handlers:
+        root.addHandler(handler)
     root.setLevel(level)
