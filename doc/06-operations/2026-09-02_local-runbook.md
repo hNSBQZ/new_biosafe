@@ -80,6 +80,19 @@ Vite 把 `/api` 和 `/health` 代理到本机 8000 端口，其中 `/api` 显式
 
 浏览器开发工具中确认连接地址为当前前端主机的 `/api/v1/chat/audio`。开发环境需使用当前 `vite.config.ts` 的 `ws: true` 配置，并在配置变化后重启 Vite；生产代理需转发 WebSocket upgrade。前端等待 8 秒仍未建立连接时会显示超时，不会永久停在连接状态。注意 `ASR_URI` 是 FastAPI 到 ASR 服务的第二层连接，只有录音提交后才会使用。
 
+### TTS 有分片但没有声音
+
+TTS endpoint 返回原始单声道 PCM16，采样率由 `TTS_SAMPLE_RATE` 声明，默认 `24000`。该值必须与 TTS 服务真实输出一致，否则会出现播放速度或音高异常。
+
+前端会在用户点击麦克风时创建并解锁 `AudioContext`，收到 `audio_stream.data` 后按 `sequence` 排序和连续调度。排查顺序：
+
+1. WebSocket 是否收到 `audio_stream` 的 `data` 和最终 `finished` 事件。
+2. `data` 事件是否包含 `format=pcm_s16le`、正确的 `sample_rate` 和 `channels=1`。
+3. 浏览器是否禁止当前站点播放音频；重新点击页面内麦克风可重新建立用户激活。
+4. 页面是否显示“语音播放失败，已保留文字”；出现该提示时文字答案仍应完整保留。
+
+播放阶段的“取消”会停止所有已调度 source、清空未播放分片并关闭 `AudioContext`，不会继续后台发声。
+
 ### 直接访问子路由 404
 
 Vite 开发环境应自动回退。生产环境出现该问题时，在 Web 服务器配置 SPA fallback；不要把 `/api` 和 `/health` 回退到 `index.html`。
