@@ -187,6 +187,7 @@ export function App() {
   const [textRequestPending, setTextRequestPending] = useState(false)
   const chatAbortRef = useRef<AbortController | null>(null)
   const voiceSocketRef = useRef<WebSocket | null>(null)
+  const voiceConnectTimeoutRef = useRef<number | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const voiceChunksRef = useRef<Blob[]>([])
@@ -254,6 +255,7 @@ export function App() {
   useEffect(() => {
     return () => {
       chatAbortRef.current?.abort()
+      clearVoiceConnectTimeout()
       voiceSocketRef.current?.close()
       recorderRef.current?.stop()
       streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -522,12 +524,31 @@ export function App() {
           return
         }
         const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
-        const arrayBuffer = await blob.arrayBuffer()
+        let audioBytes: Uint8Array
+        try {
+          audioBytes = await blobToWavBytes(blob, 16_000)
+        } catch (error) {
+          const detail = `录音格式转换失败：${describeError(error)}`
+          setVoicePhase('error')
+          setVoiceError(detail)
+          setVoiceMessage('录音处理失败')
+          updateTurn(turnId, (item) => ({
+            ...item,
+            status: 'failed',
+            answerSource: item.answerSource || 'error',
+            errorCode: 'voice_audio_conversion_failed',
+            errorMessage: detail,
+          }))
+          pendingVoiceTurnIdRef.current = null
+          setActiveTurnId((current) => (current === turnId ? null : current))
+          await stopVoiceResources()
+          return
+        }
         socket.send(
           JSON.stringify({
             type: 'audio_data',
             seq: 0,
-            data: bytesToBase64(new Uint8Array(arrayBuffer)),
+            data: bytesToBase64(audioBytes),
           }),
         )
         socket.send(JSON.stringify({ type: 'audio_end' }))
@@ -540,13 +561,35 @@ export function App() {
       }
       recorder.start()
       const socket = new WebSocket(buildAudioSocketUrl(selectedExperimentId))
+      let socketOpened = false
       voiceSocketRef.current = socket
+      voiceConnectTimeoutRef.current = window.setTimeout(() => {
+        if (socket.readyState !== WebSocket.CONNECTING) {
+          return
+        }
+        socket.close()
+        setVoicePhase('error')
+        setVoiceError('连接语音服务超时，请检查网络或服务地址')
+        setVoiceMessage('连接超时')
+        updateTurn(turnId, (item) => ({
+          ...item,
+          status: 'failed',
+          answerSource: item.answerSource || 'error',
+          errorCode: 'voice_socket_timeout',
+          errorMessage: '连接语音服务超时',
+        }))
+        pendingVoiceTurnIdRef.current = null
+        setActiveTurnId((current) => (current === turnId ? null : current))
+        void stopVoiceResources()
+      }, 8_000)
       socket.onopen = () => {
+        socketOpened = true
+        clearVoiceConnectTimeout()
         socket.send(
           JSON.stringify({
             type: 'audio_start',
             sample_rate: 16000,
-            format: mimeType || 'webm',
+            format: 'wav',
           }),
         )
         setVoicePhase('recording')
@@ -560,6 +603,7 @@ export function App() {
         }
       }
       socket.onerror = () => {
+        clearVoiceConnectTimeout()
         setVoicePhase('error')
         setVoiceError('录音连接失败')
         setVoiceMessage('连接失败')
@@ -570,16 +614,23 @@ export function App() {
           errorCode: 'voice_socket_error',
           errorMessage: '录音连接失败',
         }))
+        pendingVoiceTurnIdRef.current = null
+        setActiveTurnId((current) => (current === turnId ? null : current))
+        void stopVoiceResources()
       }
       socket.onclose = () => {
+        clearVoiceConnectTimeout()
         setVoicePhase((current) =>
           current === 'processing' || current === 'recording' || current === 'connecting'
             ? 'idle'
             : current,
         )
-        setVoiceMessage('录音结束')
+        if (socketOpened) {
+          setVoiceMessage('录音结束')
+        }
       }
     } catch (error) {
+      clearVoiceConnectTimeout()
       setVoicePhase('error')
       setVoiceError(describeError(error))
       setVoiceMessage('录音启动失败')
@@ -635,6 +686,15 @@ export function App() {
       pendingVoiceTurnIdRef.current = null
       setActiveTurnId(null)
     }
+  }
+
+  function finishVoiceRecording() {
+    const recorder = recorderRef.current
+    if (voicePhase !== 'recording' || !recorder || recorder.state === 'inactive') {
+      return
+    }
+    setVoiceMessage('正在提交录音')
+    recorder.stop()
   }
 
   async function handleVoiceMessage(turnId: string, message: JsonRecord) {
@@ -992,7 +1052,14 @@ export function App() {
   }
 
   async function stopVoiceResources() {
+    clearVoiceConnectTimeout()
+    const recorder = recorderRef.current
     recorderRef.current = null
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.ondataavailable = null
+      recorder.onstop = null
+      recorder.stop()
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
@@ -1000,6 +1067,13 @@ export function App() {
     if (voiceSocketRef.current) {
       voiceSocketRef.current.close()
       voiceSocketRef.current = null
+    }
+  }
+
+  function clearVoiceConnectTimeout() {
+    if (voiceConnectTimeoutRef.current !== null) {
+      window.clearTimeout(voiceConnectTimeoutRef.current)
+      voiceConnectTimeoutRef.current = null
     }
   }
 
@@ -1170,7 +1244,7 @@ export function App() {
                         onClick={() =>
                           voicePhase === 'idle'
                             ? void startVoiceSession()
-                            : void stopVoiceSession(true)
+                            : finishVoiceRecording()
                         }
                         disabled={textRequestPending || voicePhase === 'connecting' || voicePhase === 'processing'}
                         aria-label={voicePhase === 'recording' ? '停止录音' : '开始录音'}
@@ -2105,6 +2179,70 @@ function resolveRecordingMimeType() {
     return 'audio/webm'
   }
   return ''
+}
+
+async function blobToWavBytes(blob: Blob, targetSampleRate: number) {
+  const context = new AudioContext()
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer())
+    const mono = new Float32Array(decoded.length)
+    for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+      const channelData = decoded.getChannelData(channel)
+      for (let index = 0; index < channelData.length; index += 1) {
+        mono[index] += channelData[index] / decoded.numberOfChannels
+      }
+    }
+    const resampled = resampleAudio(mono, decoded.sampleRate, targetSampleRate)
+    return encodeMonoWav(resampled, targetSampleRate)
+  } finally {
+    await context.close()
+  }
+}
+
+function resampleAudio(input: Float32Array, sourceRate: number, targetRate: number) {
+  if (sourceRate === targetRate) {
+    return input
+  }
+  const ratio = sourceRate / targetRate
+  const output = new Float32Array(Math.max(1, Math.round(input.length / ratio)))
+  for (let index = 0; index < output.length; index += 1) {
+    const sourcePosition = index * ratio
+    const left = Math.floor(sourcePosition)
+    const right = Math.min(left + 1, input.length - 1)
+    const weight = sourcePosition - left
+    output[index] = input[left] * (1 - weight) + input[right] * weight
+  }
+  return output
+}
+
+function encodeMonoWav(samples: Float32Array, sampleRate: number) {
+  const bytesPerSample = 2
+  const wav = new Uint8Array(44 + samples.length * bytesPerSample)
+  const view = new DataView(wav.buffer)
+  writeAscii(view, 0, 'RIFF')
+  view.setUint32(4, wav.length - 8, true)
+  writeAscii(view, 8, 'WAVE')
+  writeAscii(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * bytesPerSample, true)
+  view.setUint16(32, bytesPerSample, true)
+  view.setUint16(34, 16, true)
+  writeAscii(view, 36, 'data')
+  view.setUint32(40, samples.length * bytesPerSample, true)
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]))
+    view.setInt16(44 + index * bytesPerSample, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+  }
+  return wav
+}
+
+function writeAscii(view: DataView, offset: number, value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index))
+  }
 }
 
 function bytesToBase64(bytes: Uint8Array) {
