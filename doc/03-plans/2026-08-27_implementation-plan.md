@@ -74,7 +74,7 @@
 
 建议提交：`feat(admin): manage ragflow datasets and documents`。
 
-## Phase 6 - 集成、部署与最终验收（TODO）
+## Phase 6 - 集成、部署与最终验收（IN_PROGRESS）
 
 - 整理 requirements、前端 lockfile、Docker Compose、健康检查和运行文档。
 - 校验从旧 `.env` 复用服务配置但不复制 secret；补齐管理员初始化和 token 生命周期。
