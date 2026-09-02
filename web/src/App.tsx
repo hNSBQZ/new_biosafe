@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Activity,
+  BookOpen,
   CheckCircle2,
   ChevronRight,
   Clock3,
   FileText,
   History,
+  Keyboard,
   Mic,
   MessageSquareText,
   RefreshCw,
@@ -19,7 +21,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { KnowledgeAdminPanel } from './KnowledgeAdminPanel'
 
-type ViewKey = 'assistant' | 'history' | 'system'
+type ViewKey = 'assistant' | 'history' | 'system' | 'knowledge'
 type TurnInputMode = 'text' | 'voice'
 type TurnStatus = 'recording' | 'sending' | 'completed' | 'failed' | 'cancelled'
 type AnswerSource = '' | 'instruction' | 'direct' | 'rag' | 'error'
@@ -132,10 +134,11 @@ type HealthState = {
   version: string
 }
 
-const VIEW_META: Record<ViewKey, { label: string; icon: LucideIcon }> = {
-  assistant: { label: '助手', icon: MessageSquareText },
-  history: { label: '历史', icon: History },
-  system: { label: '系统', icon: Settings2 },
+const VIEW_META: Record<ViewKey, { label: string; title: string; href: string; icon: LucideIcon }> = {
+  assistant: { label: '助手演示', title: '生物安全实验助手', href: '/', icon: MessageSquareText },
+  history: { label: '历史记录', title: '历史与人工纠错', href: '/history', icon: History },
+  system: { label: '系统状态', title: '系统运行状态', href: '/system', icon: Settings2 },
+  knowledge: { label: '知识库', title: '知识库管理', href: '/knowledge', icon: BookOpen },
 }
 
 const EXPERIMENT_GENERIC: ExperimentItem = {
@@ -146,7 +149,8 @@ const EXPERIMENT_GENERIC: ExperimentItem = {
 }
 
 export function App() {
-  const [view, setView] = useState<ViewKey>('assistant')
+  const [view, setView] = useState<ViewKey>(() => viewFromPath(window.location.pathname))
+  const [composerMode, setComposerMode] = useState<TurnInputMode>('text')
   const [experiments, setExperiments] = useState<ExperimentItem[]>([])
   const [selectedExperimentId, setSelectedExperimentId] = useState('generic')
   const [experimentLoaded, setExperimentLoaded] = useState(false)
@@ -207,6 +211,12 @@ export function App() {
   useEffect(() => {
     void loadHealth()
     void loadExperiments()
+  }, [])
+
+  useEffect(() => {
+    const handlePopState = () => setView(viewFromPath(window.location.pathname))
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
   useEffect(() => {
@@ -973,6 +983,14 @@ export function App() {
     await submitQuestion(question)
   }
 
+  function navigate(nextView: ViewKey) {
+    const href = VIEW_META[nextView].href
+    if (window.location.pathname !== href) {
+      window.history.pushState({}, '', href)
+    }
+    setView(nextView)
+  }
+
   async function stopVoiceResources() {
     recorderRef.current = null
     if (streamRef.current) {
@@ -998,16 +1016,19 @@ export function App() {
           {(Object.keys(VIEW_META) as ViewKey[]).map((key) => {
             const Icon = VIEW_META[key].icon
             return (
-              <button
+              <a
                 key={key}
-                type="button"
+                href={VIEW_META[key].href}
                 className={view === key ? 'nav-item active' : 'nav-item'}
-                onClick={() => setView(key)}
-                aria-pressed={view === key}
+                onClick={(event) => {
+                  event.preventDefault()
+                  navigate(key)
+                }}
+                aria-current={view === key ? 'page' : undefined}
               >
                 <Icon aria-hidden="true" />
                 <span>{VIEW_META[key].label}</span>
-              </button>
+              </a>
             )
           })}
         </nav>
@@ -1037,7 +1058,7 @@ export function App() {
         <header className="topbar">
           <div className="topbar-copy">
             <p className="eyebrow">实验训练工作台</p>
-            <h1>文本、历史与语音</h1>
+            <h1>{VIEW_META[view].title}</h1>
           </div>
           <div className="topbar-meta">
             <span className="meta-chip">
@@ -1054,15 +1075,15 @@ export function App() {
           </div>
         </header>
 
-        <div className="workspace-grid">
+        <div className={view === 'assistant' ? 'workspace-grid' : 'workspace-grid single-column'}>
           <section className="primary-column">
             {view === 'assistant' && (
               <div className="stack">
-                <section className="panel panel-form">
+                <section className="panel scenario-panel">
                   <div className="panel-header">
                     <div>
-                      <p className="panel-kicker">助手</p>
-                      <h2>提问</h2>
+                      <p className="panel-kicker">实验场景</p>
+                      <h2>选择实验场景</h2>
                     </div>
                     <div className="panel-actions">
                       <button
@@ -1075,21 +1096,63 @@ export function App() {
                       </button>
                     </div>
                   </div>
-                  <div className="controls-grid">
-                    <label className="field">
-                      <span>实验</span>
-                      <select
-                        value={selectedExperimentId}
-                        onChange={(event) => setSelectedExperimentId(event.target.value)}
+                  <div className="scenario-grid" role="list" aria-label="实验场景">
+                    {[EXPERIMENT_GENERIC, ...experiments.filter((item) => item.id !== EXPERIMENT_GENERIC.id)].map(
+                      (item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={
+                            selectedExperimentId === item.id
+                              ? 'scenario-card active'
+                              : 'scenario-card'
+                          }
+                          onClick={() => setSelectedExperimentId(item.id)}
+                          aria-pressed={selectedExperimentId === item.id}
+                        >
+                          <span>{item.title}</span>
+                          <small>
+                            {item.step_count > 0 || item.knowledge_point_count > 0
+                              ? `${item.step_count} 步 · ${item.knowledge_point_count} 个知识点`
+                              : '通用问答场景'}
+                          </small>
+                        </button>
+                      ),
+                    )}
+                  </div>
+                </section>
+
+                <section className="panel panel-form">
+                  <div className="panel-header composer-header">
+                    <div>
+                      <p className="panel-kicker">提问</p>
+                      <h2>{selectedExperiment.title}</h2>
+                    </div>
+                    <div className="mode-switch" role="group" aria-label="提问方式">
+                      <button
+                        type="button"
+                        className={composerMode === 'text' ? 'active' : ''}
+                        onClick={() => setComposerMode('text')}
+                        aria-pressed={composerMode === 'text'}
+                        disabled={voicePhase !== 'idle'}
                       >
-                        <option value={EXPERIMENT_GENERIC.id}>{EXPERIMENT_GENERIC.title}</option>
-                        {experiments.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.title} · {item.step_count} 步 · {item.knowledge_point_count} 点
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                        <Keyboard aria-hidden="true" />
+                        文字
+                      </button>
+                      <button
+                        type="button"
+                        className={composerMode === 'voice' ? 'active' : ''}
+                        onClick={() => setComposerMode('voice')}
+                        aria-pressed={composerMode === 'voice'}
+                        disabled={voicePhase !== 'idle'}
+                      >
+                        <Mic aria-hidden="true" />
+                        语音
+                      </button>
+                    </div>
+                  </div>
+
+                  {composerMode === 'text' ? (
                     <label className="field grow">
                       <span>问题</span>
                       <textarea
@@ -1099,36 +1162,78 @@ export function App() {
                         rows={4}
                       />
                     </label>
-                  </div>
-                  <div className="toolbar">
-                    <button
-                      type="button"
-                      className="primary-button"
-                      onClick={() => void startQuestion()}
-                      disabled={!question.trim() || textRequestPending || activeTurnId !== null}
-                    >
-                      <Send aria-hidden="true" />
-                      发送
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => setQuestion('')}
-                      disabled={!question}
-                    >
-                      <X aria-hidden="true" />
-                      清空
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => void cancelCurrentQuery()}
-                      disabled={activeTurnId === null && voicePhase === 'idle'}
-                    >
-                      <Square aria-hidden="true" />
-                      取消
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="voice-composer">
+                      <button
+                        type="button"
+                        className={voicePhase === 'recording' ? 'record-button recording' : 'record-button'}
+                        onClick={() =>
+                          voicePhase === 'idle'
+                            ? void startVoiceSession()
+                            : void stopVoiceSession(true)
+                        }
+                        disabled={textRequestPending || voicePhase === 'connecting' || voicePhase === 'processing'}
+                        aria-label={voicePhase === 'recording' ? '停止录音' : '开始录音'}
+                      >
+                        {voicePhase === 'recording' ? (
+                          <Square aria-hidden="true" />
+                        ) : (
+                          <Mic aria-hidden="true" />
+                        )}
+                      </button>
+                      <div className="voice-status" aria-live="polite">
+                        <strong>{voiceMessage}</strong>
+                        <span>{voiceError || voiceTranscript || '点击麦克风开始录音'}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {composerMode === 'text' && (
+                    <div className="toolbar composer-toolbar">
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => void startQuestion()}
+                        disabled={!question.trim() || textRequestPending || activeTurnId !== null}
+                      >
+                        <Send aria-hidden="true" />
+                        发送
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => setQuestion('')}
+                        disabled={!question}
+                      >
+                        <X aria-hidden="true" />
+                        清空
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => void cancelCurrentQuery()}
+                        disabled={activeTurnId === null}
+                      >
+                        <Square aria-hidden="true" />
+                        取消
+                      </button>
+                    </div>
+                  )}
+
+                  {composerMode === 'voice' && voiceSessionId && (
+                    <p className="voice-session-id">会话 {voiceSessionId.slice(0, 10)}</p>
+                  )}
+                  {composerMode === 'voice' && voiceSegments.length > 0 && (
+                    <div className="segment-strip" aria-label="TTS 分片">
+                      {voiceSegments.map((segment) => (
+                        <div key={segment.sequence} className="segment-chip">
+                          <FileText aria-hidden="true" />
+                          {segment.sequence + 1}
+                          <span>{segment.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
 
                 <section className="panel">
@@ -1160,61 +1265,6 @@ export function App() {
                   )}
                 </section>
 
-                <section className="panel">
-                  <div className="panel-header">
-                    <div>
-                      <p className="panel-kicker">录音</p>
-                      <h2>语音控制</h2>
-                    </div>
-                    <Pill tone={voicePhase === 'error' ? 'danger' : 'neutral'}>{voicePhase}</Pill>
-                  </div>
-                  <div className="toolbar">
-                    <button
-                      type="button"
-                      className="primary-button"
-                      onClick={() => void startVoiceSession()}
-                      disabled={voicePhase !== 'idle' || textRequestPending}
-                    >
-                      <Mic aria-hidden="true" />
-                      开始录音
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => void stopVoiceSession(true)}
-                      disabled={voicePhase === 'idle'}
-                    >
-                      <Square aria-hidden="true" />
-                      停止
-                    </button>
-                  </div>
-                  <div className="voice-grid">
-                    <div className="mini-panel">
-                      <span className="mini-label">状态</span>
-                      <strong>{voiceMessage}</strong>
-                      <p>{voiceError || '浏览器录音通过 WebSocket 接入现有语音链路。'}</p>
-                    </div>
-                    <div className="mini-panel">
-                      <span className="mini-label">转写</span>
-                      <strong>{voiceTranscript || '等待转写'}</strong>
-                      <p>{voiceSessionId ? `会话 ${voiceSessionId.slice(0, 10)}` : '未建立会话'}</p>
-                    </div>
-                  </div>
-                  {voiceSegments.length > 0 && (
-                    <div className="segment-strip" aria-label="TTS 分片">
-                      {voiceSegments.map((segment) => (
-                        <div
-                          key={segment.sequence}
-                          className="segment-chip"
-                        >
-                          <FileText aria-hidden="true" />
-                          {segment.sequence + 1}
-                          <span>{segment.text}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
               </div>
             )}
 
@@ -1460,12 +1510,17 @@ export function App() {
                     </div>
                   </div>
                 </section>
-                <KnowledgeAdminPanel onNotice={setGlobalNotice} />
               </div>
+            )}
+
+            {view === 'knowledge' && (
+              <section className="knowledge-page">
+                <KnowledgeAdminPanel onNotice={setGlobalNotice} />
+              </section>
             )}
           </section>
 
-          <aside className="inspector">
+          {view === 'assistant' && <aside className="inspector">
             <section className="panel inspector-panel">
               <div className="panel-header slim">
                 <div>
@@ -1525,7 +1580,7 @@ export function App() {
                 </div>
               )}
             </section>
-          </aside>
+          </aside>}
         </div>
       </main>
 
@@ -1998,6 +2053,20 @@ function safeParseJson(value: unknown) {
   } catch {
     return null
   }
+}
+
+function viewFromPath(pathname: string): ViewKey {
+  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  if (normalized === '/history') {
+    return 'history'
+  }
+  if (normalized === '/system') {
+    return 'system'
+  }
+  if (normalized === '/knowledge') {
+    return 'knowledge'
+  }
+  return 'assistant'
 }
 
 function currentSessionId() {

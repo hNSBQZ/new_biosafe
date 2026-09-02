@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 
@@ -93,6 +93,7 @@ const chatSse = [
 ].join('\n')
 
 beforeEach(() => {
+  window.history.replaceState({}, '', '/')
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -151,16 +152,19 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   vi.restoreAllMocks()
   window.sessionStorage.clear()
+  window.history.replaceState({}, '', '/')
 })
 
 describe('App', () => {
   it('renders the assistant workspace and streams a citation-backed answer', async () => {
     render(<App />)
 
-    expect(await screen.findByRole('heading', { name: '文本、历史与语音' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '生物安全实验助手' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '选择实验场景' })).toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('textbox', { name: '问题' }), {
       target: { value: '新冠活病毒培养需要什么实验室？' },
@@ -186,7 +190,7 @@ describe('App', () => {
   it('shows history detail and saves a correction', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: '历史' })[0])
+    fireEvent.click(screen.getByRole('link', { name: '历史记录' }))
 
     expect(await screen.findByRole('heading', { name: '记录与纠错' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '新冠活病毒培养需要什么实验室？' })).toBeInTheDocument()
@@ -207,9 +211,21 @@ describe('App', () => {
   it('handles missing microphone support', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: '开始录音' })[0])
+    fireEvent.click(screen.getByRole('button', { name: '语音' }))
+    fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
 
     expect(await screen.findByText('录音不可用')).toBeInTheDocument()
+  })
+
+  it('keeps knowledge management on its own route', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('link', { name: '知识库' }))
+
+    expect(window.location.pathname).toBe('/knowledge')
+    expect(screen.getByRole('heading', { level: 1, name: '知识库管理' })).toBeInTheDocument()
+    expect(screen.getByText(/BIOSAFE_ADMIN_PASSWORD/)).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '问题' })).not.toBeInTheDocument()
   })
 })
 

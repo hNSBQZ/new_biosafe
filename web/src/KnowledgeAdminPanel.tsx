@@ -434,6 +434,9 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
               />
             </label>
           </div>
+          <p className="admin-auth-hint">
+            账号由服务端 .env 中的 BIOSAFE_ADMIN_USERNAME 和 BIOSAFE_ADMIN_PASSWORD 配置。
+          </p>
           <div className="toolbar">
             <button
               type="button"
