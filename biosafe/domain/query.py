@@ -43,13 +43,6 @@ class QueryEvent:
 
 
 @dataclass(frozen=True)
-class DirectDecision:
-    decision: str
-    answer: str = ""
-    raw_response: str = ""
-
-
-@dataclass(frozen=True)
 class FuncCallResult:
     command: str
     confidence: float
@@ -57,6 +50,14 @@ class FuncCallResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class DirectDecision:
+    decision: str
+    answer: str = ""
+    func_call: FuncCallResult | None = None
+    raw_response: str = ""
 
 
 class QueryFailure(RuntimeError):

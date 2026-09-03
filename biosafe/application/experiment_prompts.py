@@ -15,10 +15,28 @@ _DECISION_RULES = """\
 你只能输出一个 JSON 对象，不要输出 Markdown、解释或额外文本。
 
 可选输出：
-1. 如果当前实验上下文足以可靠回答用户问题：
+1. 只有当用户的主要意图是控制实验界面，或询问当前虚拟实验的界面状态时：
+   {"decision":"func_call","func_call":{"command":"命令名","confidence":0到1,"params":{}}}
+2. 如果当前实验上下文足以可靠回答用户问题：
    {"decision":"direct","answer":"不超过 120 字的中文回答"}
-2. 如果当前实验上下文不足、问题超出当前实验、你不确定，或需要法规/标准/文档依据：
+3. 如果当前实验上下文不足、问题超出当前实验、你不确定，或需要法规/标准/文档依据：
    {"decision":"need_rag"}
+
+FuncCall 命令白名单：
+- ShowProcedurePanel：用户明确要求查看当前步骤、流程或进度，params 必须为空。
+- CurrentExperimentOperation：用户询问当前这一步在界面中要做什么，params 必须为空。
+- ShowEquipmentName：用户要求显示当前选中设备的名称，params 必须为空。
+- SwitchExperimentScene：用户明确要求切换、打开或进入实验场景，params 必须为空。
+
+FuncCall 判断要求：
+- 不能只因出现“进入、打开、步骤、实验”等关键词就调用命令。
+- “进入生物安全实验室时，应当佩戴什么防护？”是知识问题，不是 FuncCall。
+- “打开实验室门前需要注意什么？”是知识问题，不是 FuncCall。
+- “现在第几步了？”可以返回 ShowProcedurePanel。
+- “这一步怎么操作？”可以返回 CurrentExperimentOperation。
+- “这个设备叫什么？”可以返回 ShowEquipmentName。
+- “切换到 PCR 实验”可以返回 SwitchExperimentScene。
+- 只有高度确定时才返回 func_call，confidence 必须不低于 0.8。
 
 直接回答要求：
 - 只使用当前实验上下文中能支持的信息，不编造依据。

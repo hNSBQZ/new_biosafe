@@ -113,8 +113,13 @@ async def _collect(service: QueryService, request: QueryRequest, **kwargs: Any) 
 
 
 @pytest.mark.asyncio
-async def test_instruction_path_records_func_call_without_llm(tmp_path: Path) -> None:
-    llm = FakeLLM([])
+async def test_model_instruction_path_records_whitelisted_func_call(tmp_path: Path) -> None:
+    llm = FakeLLM(
+        [
+            '{"decision":"func_call","func_call":'
+            '{"command":"ShowProcedurePanel","confidence":0.97,"params":{}}}'
+        ]
+    )
     service, history = _service(tmp_path, llm=llm, ragflow=FakeRAGFlow([]))
 
     events = await _collect(service, QueryRequest(question="现在第几步了", request_id="req-1"))
@@ -122,7 +127,8 @@ async def test_instruction_path_records_func_call_without_llm(tmp_path: Path) ->
     assert events[-1]["event"] == "completed"
     assert events[-1]["data"]["answer_source"] == "instruction"
     assert events[-1]["data"]["func_call"]["command"] == "ShowProcedurePanel"
-    assert llm.calls == []
+    assert len(llm.calls) == 1
+    assert '"decision":"func_call"' in llm.calls[0][0]["content"]
     saved = history.get_by_request_id("req-1")
     assert saved is not None
     assert saved.answer_source == "instruction"
@@ -149,6 +155,78 @@ async def test_direct_path_records_answer(tmp_path: Path) -> None:
     assert saved.answer_source == "direct"
     assert saved.status == "completed"
     assert [item.id for item in correction_dispatcher.histories] == [saved.id]
+
+
+@pytest.mark.asyncio
+async def test_laboratory_protection_question_follows_model_rag_decision(tmp_path: Path) -> None:
+    service, _ = _service(
+        tmp_path,
+        llm=FakeLLM(
+            [
+                '{"decision":"need_rag"}',
+                "进入实验室前应按风险评估选择个人防护装备 [1]。",
+            ]
+        ),
+        ragflow=FakeRAGFlow([_chunk()]),
+    )
+
+    events = await _collect(
+        service,
+        QueryRequest(
+            question="进入生物安全实验室时，应当佩戴什么防护？",
+            request_id="req-laboratory-ppe",
+        ),
+    )
+
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["answer_source"] == "rag"
+
+
+@pytest.mark.asyncio
+async def test_invalid_model_func_call_falls_back_to_rag(tmp_path: Path) -> None:
+    service, _ = _service(
+        tmp_path,
+        llm=FakeLLM(
+            [
+                '{"decision":"func_call","func_call":'
+                '{"command":"DeleteExperiment","confidence":1,"params":{}}}',
+                "只能执行经过授权的实验操作 [1]。",
+            ]
+        ),
+        ragflow=FakeRAGFlow([_chunk()]),
+    )
+
+    events = await _collect(
+        service,
+        QueryRequest(question="删除实验", request_id="req-invalid-func-call"),
+    )
+
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["answer_source"] == "rag"
+
+
+@pytest.mark.asyncio
+async def test_model_func_call_with_params_falls_back_to_rag(tmp_path: Path) -> None:
+    service, _ = _service(
+        tmp_path,
+        llm=FakeLLM(
+            [
+                '{"decision":"func_call","func_call":'
+                '{"command":"SwitchExperimentScene","confidence":1,'
+                '"params":{"experiment_id":"4"}}}',
+                "实验切换参数不应由当前协议自动补充 [1]。",
+            ]
+        ),
+        ragflow=FakeRAGFlow([_chunk()]),
+    )
+
+    events = await _collect(
+        service,
+        QueryRequest(question="切换到实验四", request_id="req-func-call-params"),
+    )
+
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["answer_source"] == "rag"
 
 
 @pytest.mark.asyncio

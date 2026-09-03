@@ -81,7 +81,8 @@
 - `IN_PROGRESS`：语音回答增加播放波形与逐分片字幕；RAG 合成使用句级引用修复与 coverage warning，硬校验保留至少一个有效引用且编号不越界，引用标号直接关联并展示 RAGFlow 文档名。
 - `IN_PROGRESS`：引用合成失败时记录脱敏的 LLM 首稿、修复稿、未引用片段和 chunk/document 映射，补足运行时诊断证据。
 - `DONE`：成功问答异步进入有界修正队列，由独立强模型重新回答；模型建议和来源只供展示、审计与人工采纳，不覆盖人工纠错、不进入知识库或在线回答；真实模型与隔离数据库端到端验证通过。
-- `DONE`：收紧场景切换 FuncCall 规则，避免“进入生物安全实验室时……”等知识问题误触发 `SwitchExperimentScene`；保留明确的实验切换命令。
+- `DONE`（后续已替代）：收紧场景切换 FuncCall 规则，避免“进入生物安全实验室时……”等知识问题误触发 `SwitchExperimentScene`。
+- `DONE`：将 FuncCall 并入第一轮实验上下文 LLM 的三路结构化决定，以严格命令白名单和空参数校验替代在线本地正则识别；真实模型正反例通过。
 - 校验从旧 `.env` 复用服务配置但不复制 secret；补齐管理员初始化和 token 生命周期。
 - 运行后端全量测试、前端测试/build、RAGFlow live smoke、文本/语音/管理 Playwright E2E。
 - 检查 Git 历史和工作树没有 secret、数据库、日志或大产物。

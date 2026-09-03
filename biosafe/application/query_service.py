@@ -14,10 +14,10 @@ from typing import Any
 
 from biosafe.application.correction_dispatcher import CorrectionDispatcherProtocol
 from biosafe.application.experiment_prompts import ExperimentPromptStore
-from biosafe.application.funcall_detector import detect_funcall
 from biosafe.domain.history import AnswerSource, HistoryCreate
 from biosafe.domain.query import (
     DirectDecision,
+    FuncCallResult,
     QueryCancelled,
     QueryEvent,
     QueryFailure,
@@ -36,6 +36,15 @@ CancelChecker = Callable[[], bool | Awaitable[bool]]
 
 _CITATION_PATTERN = re.compile(r"\[(\d{1,3})\]")
 _ANSWER_SEGMENT_PATTERN = re.compile(r"[^。！？!?；;\n]+[。！？!?；;]?|\n")
+_FUNCALL_COMMANDS = frozenset(
+    {
+        "ShowProcedurePanel",
+        "CurrentExperimentOperation",
+        "ShowEquipmentName",
+        "SwitchExperimentScene",
+    }
+)
+_MIN_FUNCALL_CONFIDENCE = 0.8
 
 _RAG_SYSTEM_PROMPT = (
     "你是一名生物安全领域的专业助手。请严格根据参考资料回答用户问题。\n\n"
@@ -128,9 +137,23 @@ class QueryService:
             )
             await check_cancelled()
 
-            yield make_event("stage", QueryStage.INSTRUCTION, {})
-            funcall = detect_funcall(request.question)
-            if funcall is not None:
+            yield make_event("stage", QueryStage.DIRECT_DECISION, {})
+            decision_started = perf_counter()
+            decision, fallback_reason = await self._direct_decision(request)
+            latency["direct_decision_ms"] = _elapsed_ms(decision_started)
+            yield make_event(
+                "stage_result",
+                QueryStage.DIRECT_DECISION,
+                {
+                    "decision": decision.decision,
+                    "fallback_reason": fallback_reason or "",
+                },
+            )
+            await check_cancelled()
+
+            if decision.decision == "func_call" and decision.func_call is not None:
+                yield make_event("stage", QueryStage.INSTRUCTION, {})
+                funcall = decision.func_call
                 answer_source = AnswerSource.INSTRUCTION.value
                 system_answer = json.dumps(
                     {"type": "FuncCall", **funcall.to_dict()},
@@ -156,21 +179,6 @@ class QueryService:
                     },
                 )
                 return
-
-            await check_cancelled()
-            yield make_event("stage", QueryStage.DIRECT_DECISION, {})
-            decision_started = perf_counter()
-            decision, fallback_reason = await self._direct_decision(request)
-            latency["direct_decision_ms"] = _elapsed_ms(decision_started)
-            yield make_event(
-                "stage_result",
-                QueryStage.DIRECT_DECISION,
-                {
-                    "decision": decision.decision,
-                    "fallback_reason": fallback_reason or "",
-                },
-            )
-            await check_cancelled()
 
             if decision.decision == "direct":
                 answer_source = AnswerSource.DIRECT.value
@@ -602,7 +610,38 @@ def _parse_direct_decision(raw_response: str) -> DirectDecision:
             answer=str(payload["answer"]).strip(),
             raw_response=raw_response,
         )
+    if payload.get("decision") == "func_call":
+        func_call = _parse_func_call(payload.get("func_call"))
+        if func_call is not None:
+            return DirectDecision(
+                decision="func_call",
+                func_call=func_call,
+                raw_response=raw_response,
+            )
     return DirectDecision(decision="need_rag", raw_response=raw_response)
+
+
+def _parse_func_call(value: Any) -> FuncCallResult | None:
+    if not isinstance(value, dict):
+        return None
+    command = value.get("command")
+    confidence = value.get("confidence")
+    params = value.get("params")
+    if not isinstance(command, str) or command not in _FUNCALL_COMMANDS:
+        return None
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not _MIN_FUNCALL_CONFIDENCE <= float(confidence) <= 1.0
+    ):
+        return None
+    if params != {}:
+        return None
+    return FuncCallResult(
+        command=str(command),
+        confidence=float(confidence),
+        params={},
+    )
 
 
 def _build_rag_messages(question: str, chunks: list[RetrievedChunk]) -> list[dict[str, str]]:

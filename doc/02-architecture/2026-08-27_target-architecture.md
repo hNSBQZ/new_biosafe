@@ -10,8 +10,7 @@ FastAPI（HTTP/SSE/WebSocket、鉴权、校验）
             |
             v
 QueryService
-  |-- FuncCallDetector
-  |-- ExperimentPromptStore -> LLM direct decision
+  |-- ExperimentPromptStore -> LLM FuncCall/direct/RAG decision
   |-- RAGFlowClient -> retrieval only
   |-- AnswerSynthesizer -> LLM + citation markers
   `-- HistoryRepository -> one SQLite database
@@ -44,8 +43,8 @@ doc/
 ## 查询状态机
 
 1. `received`：校验问题和实验 ID。
-2. `instruction`：规则检测命中则返回命令并记历史。
-3. `direct_decision`：实验提示词 + 原始问题交给 LLM，响应只能是 direct answer 或 NEED_RAG。
+2. `direct_decision`：实验提示词 + 原始问题交给 LLM，响应只能是白名单 FuncCall、direct answer 或 NEED_RAG；FuncCall 参数保持为空。
+3. `instruction`：模型决定为合法 FuncCall 时返回命令并记历史。
 4. `retrieving`：只把原始问题、选择的数据集 ID 和可配置检索参数交给 RAGFlow。
 5. `synthesizing`：把归一化 chunks 交给 LLM，要求使用 `[1]` 形式引用且禁止编造来源。
 6. `completed/failed/cancelled`：先完成数据库记录，再发送终态事件。

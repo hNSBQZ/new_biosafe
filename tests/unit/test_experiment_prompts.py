@@ -27,6 +27,10 @@ def test_loads_legacy_experiment_markdown_and_builds_strict_json_prompt(tmp_path
     assert messages[0]["role"] == "system"
     assert '"decision":"direct"' in messages[0]["content"]
     assert '"decision":"need_rag"' in messages[0]["content"]
+    assert '"decision":"func_call"' in messages[0]["content"]
+    assert "进入生物安全实验室时，应当佩戴什么防护" in messages[0]["content"]
+    assert "CurrentExperimentOperation" in messages[0]["content"]
+    assert "ShowEquipmentName" in messages[0]["content"]
     assert "常用吸入麻醉剂是异氟醚或乙醚" in messages[0]["content"]
 
 
