@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import {
   Activity,
+  Bot,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -12,10 +13,11 @@ import {
   Mic,
   MessageSquareText,
   RefreshCw,
-  Search,
   Send,
   Settings2,
   Square,
+  UserRound,
+  Volume2,
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -26,6 +28,7 @@ type ViewKey = 'assistant' | 'history' | 'system' | 'knowledge'
 type TurnInputMode = 'text' | 'voice'
 type TurnStatus = 'recording' | 'sending' | 'completed' | 'failed' | 'cancelled'
 type AnswerSource = '' | 'instruction' | 'direct' | 'rag' | 'error'
+type VoicePlayback = 'none' | 'buffering' | 'playing' | 'completed' | 'failed'
 type JsonRecord = Record<string, unknown>
 
 type ExperimentItem = {
@@ -112,6 +115,8 @@ type TurnRecord = {
   transcript: string
   answerSource: AnswerSource
   answer: string
+  voiceSegments: VoiceSegment[]
+  voicePlayback: VoicePlayback
   funcCall?: FuncCallData
   references: CitationReference[]
   historyId?: number
@@ -137,9 +142,9 @@ type HealthState = {
 
 const VIEW_META: Record<ViewKey, { label: string; title: string; href: string; icon: LucideIcon }> = {
   assistant: { label: '助手演示', title: '生物安全实验助手', href: '/', icon: MessageSquareText },
-  history: { label: '历史记录', title: '历史与人工纠错', href: '/history', icon: History },
-  system: { label: '系统状态', title: '系统运行状态', href: '/system', icon: Settings2 },
-  knowledge: { label: '知识库', title: '知识库管理', href: '/knowledge', icon: BookOpen },
+  history: { label: '历史与纠错', title: '历史与人工纠错', href: '/admin/history', icon: History },
+  system: { label: '系统状态', title: '系统运行状态', href: '/admin/system', icon: Settings2 },
+  knowledge: { label: '知识库管理', title: '知识库管理', href: '/admin/knowledge', icon: BookOpen },
 }
 
 const EXPERIMENT_GENERIC: ExperimentItem = {
@@ -164,7 +169,6 @@ export function App() {
   const [voiceMessage, setVoiceMessage] = useState('录音待命')
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [voiceSessionId, setVoiceSessionId] = useState('')
-  const [voiceSegments, setVoiceSegments] = useState<VoiceSegment[]>([])
   const [voiceError, setVoiceError] = useState('')
   const [historyPage, setHistoryPage] = useState(1)
   const [historyPageSize, setHistoryPageSize] = useState(8)
@@ -191,6 +195,7 @@ export function App() {
   const voicePlayerRef = useRef<PcmStreamPlayer | null>(null)
   const voicePlaybackFailedRef = useRef(false)
   const voiceConnectTimeoutRef = useRef<number | null>(null)
+  const conversationRef = useRef<HTMLDivElement | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const voiceChunksRef = useRef<Blob[]>([])
@@ -209,8 +214,6 @@ export function App() {
   )
   const sessionId = useMemo(() => currentSessionId(), [])
   const currentReference = selectedReference
-  const currentTurnReferences = activeTurn?.references ?? []
-  const currentTurnTimeline = activeTurn?.timeline ?? []
   const supportedVoice = typeof window !== 'undefined' && 'MediaRecorder' in window
 
   useEffect(() => {
@@ -223,6 +226,13 @@ export function App() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
+
+  useEffect(() => {
+    const canonicalPath = VIEW_META[view].href
+    if (window.location.pathname !== canonicalPath && isLegacyManagementPath(window.location.pathname)) {
+      window.history.replaceState({}, '', canonicalPath)
+    }
+  }, [view])
 
   useEffect(() => {
     selectedHistoryIdRef.current = selectedHistoryId
@@ -331,8 +341,21 @@ export function App() {
   }, [historyPage, historyPageSize, historyStatusFilter, selectedExperimentId])
 
   useEffect(() => {
-    void loadHistoryPage()
-  }, [loadHistoryPage])
+    if (view !== 'assistant') {
+      void loadHistoryPage()
+    }
+  }, [loadHistoryPage, view])
+
+  useEffect(() => {
+    const conversation = conversationRef.current
+    if (view === 'assistant' && conversation) {
+      if (typeof conversation.scrollTo === 'function') {
+        conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' })
+      } else {
+        conversation.scrollTop = conversation.scrollHeight
+      }
+    }
+  }, [turns, view])
 
   async function loadHistoryDetail(historyId: number) {
     try {
@@ -391,13 +414,15 @@ export function App() {
       transcript: '',
       answerSource: '',
       answer: '',
+      voiceSegments: [],
+      voicePlayback: 'none',
       references: [],
       timeline: [],
       rawEvents: [],
       createdAt: Date.now(),
     }
     setQuestion('')
-    setTurns((current) => [turn, ...current])
+    setTurns((current) => [...current, turn])
     setActiveTurnId(turnId)
     setTextRequestPending(true)
     const controller = new AbortController()
@@ -478,11 +503,11 @@ export function App() {
     setVoiceError('')
     setVoiceMessage('正在连接录音')
     setVoiceTranscript('')
-    setVoiceSegments([])
     voicePlaybackFailedRef.current = false
     const turnId = makeId('voice')
     pendingVoiceTurnIdRef.current = turnId
     setTurns((current) => [
+      ...current,
       {
         id: turnId,
         inputMode: 'voice',
@@ -491,12 +516,13 @@ export function App() {
         transcript: '',
         answerSource: '',
         answer: '',
+        voiceSegments: [],
+        voicePlayback: 'none',
         references: [],
         timeline: [],
         rawEvents: [],
         createdAt: Date.now(),
       },
-      ...current,
     ])
     setActiveTurnId(turnId)
     try {
@@ -683,6 +709,7 @@ export function App() {
           ...item,
           status: 'cancelled',
           answerSource: item.answerSource || 'error',
+          voicePlayback: item.voiceSegments.length > 0 ? 'failed' : item.voicePlayback,
           errorCode: 'interrupted',
           errorMessage: '已取消',
         }))
@@ -776,6 +803,7 @@ export function App() {
         status: 'completed',
         answerSource: stringAnswerSource(stringValue(message.answer_source)),
         answer: stringValue(message.answer),
+        voicePlayback: 'buffering',
         references: normalizeReferences(message.references),
         historyId: numberValue(message.history_id) || item.historyId,
       }))
@@ -786,13 +814,11 @@ export function App() {
       if (streamEvent === 'data') {
         const sequence = numberValue(message.sequence)
         const text = stringValue(message.text)
-        setVoiceSegments((current) => [
-          ...current,
-          {
-            sequence,
-            text,
-          },
-        ])
+        updateTurn(turnId, (item) => ({
+          ...item,
+          voiceSegments: upsertVoiceSegment(item.voiceSegments, { sequence, text }),
+          voicePlayback: 'playing',
+        }))
         const player = voicePlayerRef.current
         if (player) {
           try {
@@ -809,13 +835,22 @@ export function App() {
             voicePlaybackFailedRef.current = true
             setVoiceError(detail)
             setVoiceMessage('语音播放失败，已保留文字')
+            updateTurn(turnId, (item) => ({ ...item, voicePlayback: 'failed' }))
             voicePlayerRef.current = null
             await player.stop()
           }
         }
       }
       if (streamEvent === 'skipped') {
-        await voicePlayerRef.current?.skip(numberValue(message.sequence))
+        const sequence = numberValue(message.sequence)
+        updateTurn(turnId, (item) => ({
+          ...item,
+          voiceSegments: upsertVoiceSegment(item.voiceSegments, {
+            sequence,
+            text: stringValue(message.text),
+          }),
+        }))
+        await voicePlayerRef.current?.skip(sequence)
       }
       if (streamEvent === 'finished') {
         const player = voicePlayerRef.current
@@ -830,6 +865,10 @@ export function App() {
                   ? '语音输出已完成'
                   : '语音合成失败，已保留文字',
               )
+              updateTurn(turnId, (item) => ({
+                ...item,
+                voicePlayback: message.tts_success === true ? 'completed' : 'failed',
+              }))
               setVoicePhase('idle')
             }
           } catch (error) {
@@ -838,6 +877,7 @@ export function App() {
               voicePlaybackFailedRef.current = true
               setVoiceError(`语音播放失败：${describeError(error)}`)
               setVoiceMessage('语音播放失败，已保留文字')
+              updateTurn(turnId, (item) => ({ ...item, voicePlayback: 'failed' }))
               setVoicePhase('idle')
             }
             await player.stop()
@@ -1061,6 +1101,7 @@ export function App() {
           status: 'completed',
           answerSource,
           answer: stringValue(payload.data.answer),
+          voicePlayback: 'buffering',
           references: normalizeReferences(payload.data.references),
           historyId: numberValue(payload.data.history_id) || item.historyId,
           timeline: nextTimeline,
@@ -1111,6 +1152,14 @@ export function App() {
     await submitQuestion(question)
   }
 
+  function handleQuestionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) {
+      return
+    }
+    event.preventDefault()
+    void startQuestion()
+  }
+
   function navigate(nextView: ViewKey) {
     const href = VIEW_META[nextView].href
     if (window.location.pathname !== href) {
@@ -1150,17 +1199,15 @@ export function App() {
     }
   }
 
-  const assistantTimeline = currentTurnTimeline
-
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
+    <div className={view === 'assistant' ? 'app-shell assistant-shell' : 'app-shell management-shell'}>
+      {view !== 'assistant' && <aside className="sidebar">
+        <a className="brand" href="/">
           <Activity aria-hidden="true" />
-          <span>生物安全助手</span>
-        </div>
-        <nav aria-label="主导航" className="nav">
-          {(Object.keys(VIEW_META) as ViewKey[]).map((key) => {
+          <span>生物安全管理</span>
+        </a>
+        <nav aria-label="管理导航" className="nav">
+          {(Object.keys(VIEW_META) as ViewKey[]).filter((key) => key !== 'assistant').map((key) => {
             const Icon = VIEW_META[key].icon
             return (
               <a
@@ -1199,222 +1246,69 @@ export function App() {
             </Pill>
           </div>
         </div>
-      </aside>
+      </aside>}
 
       <main className="workspace">
-        <header className="topbar">
-          <div className="topbar-copy">
-            <p className="eyebrow">实验训练工作台</p>
-            <h1>{VIEW_META[view].title}</h1>
-          </div>
-          <div className="topbar-meta">
-            <span className="meta-chip">
-              <Clock3 aria-hidden="true" />
-              {sessionId.slice(0, 8)}
-            </span>
-            <span className="meta-chip">
-              <Search aria-hidden="true" />
-              {selectedExperiment.title}
-            </span>
-            <span className="meta-chip notice" aria-live="polite">
-              {globalNotice}
-            </span>
-          </div>
-        </header>
+        {view === 'assistant' ? (
+          <header className="chat-topbar">
+            <div className="chat-brand">
+              <span className="chat-brand-mark"><Activity aria-hidden="true" /></span>
+              <div>
+                <h1>生物安全实验助手</h1>
+                <p><span className={health?.status === 'ok' ? 'online-dot' : 'online-dot offline'} />{health?.status === 'ok' ? '在线' : '服务异常'}</p>
+              </div>
+            </div>
+            <div className="chat-context">
+              <label className="experiment-select">
+                <span>实验场景</span>
+                <select
+                  value={selectedExperimentId}
+                  onChange={(event) => setSelectedExperimentId(event.target.value)}
+                  aria-label="实验场景"
+                >
+                  <option value={EXPERIMENT_GENERIC.id}>{EXPERIMENT_GENERIC.title}</option>
+                  {experiments.filter((item) => item.id !== EXPERIMENT_GENERIC.id).map((item) => (
+                    <option key={item.id} value={item.id}>{item.title}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="icon-button" onClick={() => void loadExperiments()} title="刷新实验">
+                <RefreshCw aria-hidden="true" />
+              </button>
+            </div>
+          </header>
+        ) : (
+          <header className="topbar">
+            <div className="topbar-copy">
+              <p className="eyebrow">管理控制台</p>
+              <h1>{VIEW_META[view].title}</h1>
+            </div>
+            <div className="topbar-meta">
+              <span className="meta-chip"><Clock3 aria-hidden="true" />{sessionId.slice(0, 8)}</span>
+              <span className="meta-chip notice" aria-live="polite">{globalNotice}</span>
+            </div>
+          </header>
+        )}
 
         <div className={view === 'assistant' ? 'workspace-grid' : 'workspace-grid single-column'}>
           <section className="primary-column">
             {view === 'assistant' && (
-              <div className="stack">
-                <section className="panel scenario-panel">
-                  <div className="panel-header">
-                    <div>
-                      <p className="panel-kicker">实验场景</p>
-                      <h2>选择实验场景</h2>
-                    </div>
-                    <div className="panel-actions">
-                      <button
-                        type="button"
-                        className="icon-button"
-                        onClick={() => void loadExperiments()}
-                        title="刷新实验"
-                      >
-                        <RefreshCw aria-hidden="true" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="scenario-grid" role="list" aria-label="实验场景">
-                    {[EXPERIMENT_GENERIC, ...experiments.filter((item) => item.id !== EXPERIMENT_GENERIC.id)].map(
-                      (item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={
-                            selectedExperimentId === item.id
-                              ? 'scenario-card active'
-                              : 'scenario-card'
-                          }
-                          onClick={() => setSelectedExperimentId(item.id)}
-                          aria-pressed={selectedExperimentId === item.id}
-                        >
-                          <span>{item.title}</span>
-                          <small>
-                            {item.step_count > 0 || item.knowledge_point_count > 0
-                              ? `${item.step_count} 步 · ${item.knowledge_point_count} 个知识点`
-                              : '通用问答场景'}
-                          </small>
-                        </button>
-                      ),
-                    )}
-                  </div>
-                </section>
-
-                <section className="panel panel-form">
-                  <div className="panel-header composer-header">
-                    <div>
-                      <p className="panel-kicker">提问</p>
-                      <h2>{selectedExperiment.title}</h2>
-                    </div>
-                    <div className="mode-switch" role="group" aria-label="提问方式">
-                      <button
-                        type="button"
-                        className={composerMode === 'text' ? 'active' : ''}
-                        onClick={() => setComposerMode('text')}
-                        aria-pressed={composerMode === 'text'}
-                        disabled={voicePhase !== 'idle'}
-                      >
-                        <Keyboard aria-hidden="true" />
-                        文字
-                      </button>
-                      <button
-                        type="button"
-                        className={composerMode === 'voice' ? 'active' : ''}
-                        onClick={() => setComposerMode('voice')}
-                        aria-pressed={composerMode === 'voice'}
-                        disabled={voicePhase !== 'idle'}
-                      >
-                        <Mic aria-hidden="true" />
-                        语音
-                      </button>
-                    </div>
-                  </div>
-
-                  {composerMode === 'text' ? (
-                    <label className="field grow">
-                      <span>问题</span>
-                      <textarea
-                        value={question}
-                        onChange={(event) => setQuestion(event.target.value)}
-                        placeholder="输入需要确认的实验问题"
-                        rows={4}
-                      />
-                    </label>
-                  ) : (
-                    <div className="voice-composer">
-                      <div className="voice-actions">
-                        <button
-                          type="button"
-                          className={voicePhase === 'recording' ? 'record-button recording' : 'record-button'}
-                          onClick={() =>
-                            voicePhase === 'idle'
-                              ? void startVoiceSession()
-                              : finishVoiceRecording()
-                          }
-                          disabled={
-                            textRequestPending ||
-                            voicePhase === 'connecting' ||
-                            voicePhase === 'processing'
-                          }
-                          aria-label={voicePhase === 'recording' ? '停止录音' : '开始录音'}
-                        >
-                          {voicePhase === 'recording' ? (
-                            <Square aria-hidden="true" />
-                          ) : (
-                            <Mic aria-hidden="true" />
-                          )}
-                        </button>
-                        {voicePhase !== 'idle' && (
-                          <button
-                            type="button"
-                            className="ghost-button voice-cancel-button"
-                            onClick={() => void stopVoiceSession(true)}
-                          >
-                            <X aria-hidden="true" />
-                            取消
-                          </button>
-                        )}
-                      </div>
-                      <div className="voice-status" aria-live="polite">
-                        <strong>{voiceMessage}</strong>
-                        <span>{voiceError || voiceTranscript || '点击麦克风开始录音'}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {composerMode === 'text' && (
-                    <div className="toolbar composer-toolbar">
-                      <button
-                        type="button"
-                        className="primary-button"
-                        onClick={() => void startQuestion()}
-                        disabled={!question.trim() || textRequestPending || activeTurnId !== null}
-                      >
-                        <Send aria-hidden="true" />
-                        发送
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        onClick={() => setQuestion('')}
-                        disabled={!question}
-                      >
-                        <X aria-hidden="true" />
-                        清空
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        onClick={() => void cancelCurrentQuery()}
-                        disabled={activeTurnId === null}
-                      >
-                        <Square aria-hidden="true" />
-                        取消
-                      </button>
-                    </div>
-                  )}
-
-                  {composerMode === 'voice' && voiceSessionId && (
-                    <p className="voice-session-id">会话 {voiceSessionId.slice(0, 10)}</p>
-                  )}
-                  {composerMode === 'voice' && voiceSegments.length > 0 && (
-                    <div className="segment-strip" aria-label="TTS 分片">
-                      {voiceSegments.map((segment) => (
-                        <div key={segment.sequence} className="segment-chip">
-                          <FileText aria-hidden="true" />
-                          {segment.sequence + 1}
-                          <span>{segment.text}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
-
-                <section className="panel">
-                  <div className="panel-header">
-                    <div>
-                      <p className="panel-kicker">会话</p>
-                      <h2>消息流</h2>
-                    </div>
-                    <Pill tone={activeTurn ? 'neutral' : 'success'}>
-                      {activeTurn ? activeTurn.status : '空闲'}
-                    </Pill>
-                  </div>
+              <div className="chat-page">
+                <section className="conversation" ref={conversationRef} aria-label="对话消息">
                   {turns.length === 0 ? (
-                    <EmptyState
-                      icon={MessageSquareText}
-                      title="等待提问"
-                      text="文本和语音结果会显示在这里。"
-                    />
+                    <div className="chat-welcome">
+                      <span className="welcome-mark"><Bot aria-hidden="true" /></span>
+                      <h2>今天想确认什么实验问题？</h2>
+                      <div className="prompt-suggestions" aria-label="示例问题">
+                        {[
+                          '生物安全柜使用前需要检查什么？',
+                          '样本发生泄漏应该如何处置？',
+                          '高压灭菌的关键参数有哪些？',
+                        ].map((prompt) => (
+                          <button key={prompt} type="button" onClick={() => setQuestion(prompt)}>{prompt}</button>
+                        ))}
+                      </div>
+                    </div>
                   ) : (
                     <div className="turn-list">
                       {turns.map((turn) => (
@@ -1428,6 +1322,76 @@ export function App() {
                   )}
                 </section>
 
+                <section className="chat-composer" aria-label="消息输入">
+                  <div className="composer-mode" role="group" aria-label="提问方式">
+                    <button
+                      type="button"
+                      className={composerMode === 'text' ? 'active' : ''}
+                      onClick={() => setComposerMode('text')}
+                      aria-pressed={composerMode === 'text'}
+                      disabled={voicePhase !== 'idle'}
+                    ><Keyboard aria-hidden="true" />文字</button>
+                    <button
+                      type="button"
+                      className={composerMode === 'voice' ? 'active' : ''}
+                      onClick={() => setComposerMode('voice')}
+                      aria-pressed={composerMode === 'voice'}
+                      disabled={voicePhase !== 'idle'}
+                    ><Mic aria-hidden="true" />语音</button>
+                  </div>
+
+                  {composerMode === 'text' ? (
+                    <div className="text-composer-row">
+                      <textarea
+                        value={question}
+                        onChange={(event) => setQuestion(event.target.value)}
+                        onKeyDown={handleQuestionKeyDown}
+                        placeholder={`向${selectedExperiment.title}提问`}
+                        rows={1}
+                        aria-label="问题"
+                      />
+                      {activeTurnId !== null ? (
+                        <button type="button" className="composer-action stop" onClick={() => void cancelCurrentQuery()} aria-label="取消">
+                          <Square aria-hidden="true" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="composer-action send"
+                          onClick={() => void startQuestion()}
+                          disabled={!question.trim() || textRequestPending}
+                          aria-label="发送"
+                        ><Send aria-hidden="true" /></button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="voice-input-row">
+                      <button
+                        type="button"
+                        className={voicePhase === 'recording' ? 'voice-submit recording' : 'voice-submit'}
+                        onClick={() => voicePhase === 'idle' ? void startVoiceSession() : finishVoiceRecording()}
+                        disabled={textRequestPending || voicePhase === 'connecting' || voicePhase === 'processing'}
+                        aria-label={voicePhase === 'recording' ? '停止录音' : '开始录音'}
+                      >
+                        {voicePhase === 'recording' ? <Square aria-hidden="true" /> : <Mic aria-hidden="true" />}
+                        <span>{voicePhase === 'recording' ? '结束并发送' : '开始录音'}</span>
+                      </button>
+                      <div className="voice-inline-status" aria-live="polite">
+                        <strong>{voiceMessage}</strong>
+                        <span>{voiceError || voiceTranscript || '点击后开始讲话'}</span>
+                      </div>
+                      {voicePhase !== 'idle' && (
+                        <button type="button" className="composer-action stop" onClick={() => void stopVoiceSession(true)} aria-label="取消">
+                          <X aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <div className="composer-foot">
+                    <span aria-live="polite">{activeTurn ? stageLabel(activeTurn.timeline.at(-1)?.stage || activeTurn.status) : globalNotice}</span>
+                    {composerMode === 'voice' && voiceSessionId ? <span>会话 {voiceSessionId.slice(0, 10)}</span> : null}
+                  </div>
+                </section>
               </div>
             )}
 
@@ -1683,67 +1647,6 @@ export function App() {
             )}
           </section>
 
-          {view === 'assistant' && <aside className="inspector">
-            <section className="panel inspector-panel">
-              <div className="panel-header slim">
-                <div>
-                  <p className="panel-kicker">状态</p>
-                  <h2>路径</h2>
-                </div>
-                <Pill tone={activeTurn ? toneForTurn(activeTurn) : 'neutral'}>
-                  {activeTurn ? activeTurn.answerSource || activeTurn.status : '空闲'}
-                </Pill>
-              </div>
-              {assistantTimeline.length === 0 ? (
-                <EmptyState
-                  icon={Activity}
-                  title="暂无路径"
-                  text="发起提问后会显示 received / instruction / direct / rag / completed。"
-                />
-              ) : (
-                <div className="timeline">
-                  {assistantTimeline.map((entry) => (
-                    <div key={`${entry.sequence}-${entry.event}-${entry.stage}`} className="timeline-row">
-                      <div className="timeline-mark" />
-                      <div className="timeline-copy">
-                        <div className="timeline-head">
-                          <strong>{entry.label}</strong>
-                          <span>{entry.event}</span>
-                        </div>
-                        <p>{entry.detail || '—'}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="panel inspector-panel">
-              <div className="panel-header slim">
-                <div>
-                  <p className="panel-kicker">引用</p>
-                  <h2>当前回答</h2>
-                </div>
-              </div>
-              {currentTurnReferences.length === 0 ? (
-                <EmptyState
-                  icon={FileText}
-                  title="无引用"
-                  text="命中 RAG 时会在这里列出 chunk 快照。"
-                />
-              ) : (
-                <div className="reference-list">
-                  {currentTurnReferences.map((reference) => (
-                    <ReferenceButton
-                      key={`${reference.chunk_id}-${reference.citation_index ?? 0}`}
-                      reference={reference}
-                      onClick={() => openReference(reference, 'turn')}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-          </aside>}
         </div>
       </main>
 
@@ -1823,78 +1726,98 @@ function EmptyState({
   )
 }
 
-function TurnCard({
+export function TurnCard({
   turn,
   onOpenReference,
 }: {
   turn: TurnRecord
   onOpenReference: (reference: CitationReference) => void
 }) {
+  const latestStage = turn.timeline.at(-1)
+  const pending = turn.status === 'sending' || turn.status === 'recording'
+  const voiceStreaming = turn.voicePlayback === 'buffering' || turn.voicePlayback === 'playing'
+  const voiceSegments = [...turn.voiceSegments].sort((left, right) => left.sequence - right.sequence)
+  const answerText = turn.inputMode === 'voice' && voiceStreaming
+    ? voiceSegments.map((segment) => segment.text).join('')
+    : turn.answer
+
   return (
-    <article className="turn-card">
-      <div className="turn-head">
-        <div className="turn-meta">
-          <Pill tone={turn.inputMode === 'voice' ? 'success' : 'neutral'}>
-            {turn.inputMode === 'voice' ? '语音' : '文本'}
-          </Pill>
-          <Pill tone={toneForTurn(turn)}>{turn.status}</Pill>
-          <span className="turn-id">{turn.requestId || turn.id}</span>
+    <article className="conversation-turn">
+      <div className="message-row user-message">
+        <div className="message-column">
+          <div className="message-meta">
+            <span>{turn.inputMode === 'voice' ? '语音提问' : '你'}</span>
+            <time>{new Date(turn.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
+          </div>
+          <div className="message-bubble user-bubble">
+            <p>{turn.question || turn.transcript || '正在听取语音…'}</p>
+          </div>
         </div>
-        <span className="turn-time">{new Date(turn.createdAt).toLocaleTimeString('zh-CN')}</span>
+        <span className="message-avatar user-avatar"><UserRound aria-hidden="true" /></span>
       </div>
 
-      <div className="turn-question">
-        <span className="mini-label">问题</span>
-        <p>{turn.question || turn.transcript || '等待转写'}</p>
+      <div className="message-row assistant-message">
+        <span className="message-avatar assistant-avatar"><Bot aria-hidden="true" /></span>
+        <div className="message-column">
+          <div className="message-meta">
+            <span>实验助手</span>
+            <Pill tone={toneForTurn(turn)}>{answerSourceLabel(turn.answerSource, turn.status)}</Pill>
+          </div>
+          <div className={turn.errorMessage ? 'message-bubble assistant-bubble error' : 'message-bubble assistant-bubble'}>
+            {turn.inputMode === 'voice' && turn.voicePlayback !== 'none' ? (
+              <VoicePlaybackBar state={turn.voicePlayback} segmentCount={voiceSegments.length} />
+            ) : null}
+            {turn.answerSource === 'instruction' ? (
+              <div className="instruction-answer">
+                <strong>{turn.funcCall?.command || '已识别实验指令'}</strong>
+                <p>{formatInstructionAnswer(turn.funcCall)}</p>
+              </div>
+            ) : turn.inputMode === 'voice' && voiceStreaming && voiceSegments.length > 0 ? (
+              <div className="voice-subtitles" aria-live="polite" aria-label="语音回答字幕">
+                {voiceSegments.map((segment) => (
+                  <p key={segment.sequence}>
+                    {renderAnswerText(segment.text, turn.references, onOpenReference)}
+                  </p>
+                ))}
+              </div>
+            ) : answerText ? (
+              <p>{renderAnswerText(answerText, turn.references, onOpenReference)}</p>
+            ) : pending || voiceStreaming ? (
+              <div className="typing-state" aria-live="polite">
+                <span /><span /><span />
+                <strong>{latestStage?.label || (turn.status === 'recording' ? '正在录音' : '正在思考')}</strong>
+              </div>
+            ) : (
+              <p>本轮没有返回回答。</p>
+            )}
+
+            {turn.errorMessage ? (
+              <p className="message-error">{turn.errorCode ? `${turn.errorCode}：` : ''}{turn.errorMessage}</p>
+            ) : null}
+
+            {turn.references.length > 0 ? (
+              <div className="turn-references" aria-label="回答引用">
+                {turn.references.map((reference) => (
+                  <button
+                    key={`${reference.chunk_id}-${reference.citation_index ?? 0}`}
+                    type="button"
+                    className="citation-chip"
+                    onClick={() => onOpenReference(reference)}
+                    aria-label={`${reference.citation_index ? `[${reference.citation_index}]` : '[?]'}${reference.document_name}`}
+                  >
+                    <FileText aria-hidden="true" />
+                    {reference.citation_index ? `[${reference.citation_index}]` : '[?]'}
+                    <span>{reference.document_name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {turn.inputMode === 'voice' && turn.transcript ? (
+            <span className="transcript-note">转写：{turn.transcript}</span>
+          ) : null}
+        </div>
       </div>
-
-      {turn.inputMode === 'voice' && turn.transcript && turn.transcript !== turn.question ? (
-        <div className="turn-answer muted">
-          <span className="mini-label">转写</span>
-          <p>{turn.transcript}</p>
-        </div>
-      ) : null}
-
-      {turn.answerSource === 'instruction' ? (
-        <div className="turn-instruction">
-          <span className="mini-label">指令</span>
-          <strong>{turn.funcCall?.command || 'FuncCall'}</strong>
-          <p>{formatInstructionAnswer(turn.funcCall)}</p>
-          {turn.funcCall?.params ? <code>{JSON.stringify(turn.funcCall.params, null, 2)}</code> : null}
-        </div>
-      ) : (
-        <div className="turn-answer">
-          <span className="mini-label">回答</span>
-          <p>{renderAnswerText(turn.answer)}</p>
-        </div>
-      )}
-
-      {turn.references.length > 0 ? (
-        <div className="turn-references">
-          {turn.references.map((reference) => (
-            <button
-              key={`${reference.chunk_id}-${reference.citation_index ?? 0}`}
-              type="button"
-              className="citation-chip"
-              onClick={() => onOpenReference(reference)}
-            >
-              <FileText aria-hidden="true" />
-              {reference.citation_index ? `[${reference.citation_index}]` : '[?]'}
-              <span>{reference.document_name}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {turn.errorMessage ? (
-        <div className="turn-error">
-          <span className="mini-label">错误</span>
-          <p>
-            {turn.errorCode ? `${turn.errorCode} · ` : ''}
-            {turn.errorMessage}
-          </p>
-        </div>
-      ) : null}
     </article>
   )
 }
@@ -1977,7 +1900,38 @@ function Pill({
   return <span className={`pill ${tone}`}>{children}</span>
 }
 
-function renderAnswerText(answer: string) {
+function VoicePlaybackBar({
+  state,
+  segmentCount,
+}: {
+  state: VoicePlayback
+  segmentCount: number
+}) {
+  const active = state === 'buffering' || state === 'playing'
+  const label = state === 'buffering'
+    ? '正在缓冲语音'
+    : state === 'playing'
+      ? '正在播放语音'
+      : state === 'completed'
+        ? '语音播放完成'
+        : '语音播放失败，文字已保留'
+  return (
+    <div className={`voice-answer-stream ${active ? 'active' : state}`} aria-label={label}>
+      <Volume2 aria-hidden="true" />
+      <div className="voice-waveform" aria-hidden="true">
+        {Array.from({ length: 18 }, (_, index) => <span key={index} />)}
+      </div>
+      <span className="voice-playback-label">{label}</span>
+      {segmentCount > 0 ? <span className="voice-segment-count">{segmentCount} 段</span> : null}
+    </div>
+  )
+}
+
+function renderAnswerText(
+  answer: string,
+  references: CitationReference[] = [],
+  onOpenReference?: (reference: CitationReference) => void,
+) {
   if (!answer) {
     return '等待回答'
   }
@@ -1989,17 +1943,36 @@ function renderAnswerText(answer: string) {
     if (match.index > lastIndex) {
       nodes.push(answer.slice(lastIndex, match.index))
     }
-    nodes.push(
-      <span key={`${match.index}-${match[1]}`} className="citation-inline">
+    const citationIndex = Number(match[1])
+    const reference = references.find((item) => item.citation_index === citationIndex)
+    nodes.push(reference && onOpenReference ? (
+      <button
+        key={`${match.index}-${match[1]}`}
+        type="button"
+        className="citation-inline"
+        onClick={() => onOpenReference(reference)}
+        title={`查看来源：${reference.document_name}`}
+        aria-label={`引用 ${citationIndex}，${reference.document_name}`}
+      >
+        [{match[1]}]<span>{reference.document_name}</span>
+      </button>
+    ) : (
+      <span key={`${match.index}-${match[1]}`} className="citation-inline missing">
         [{match[1]}]
-      </span>,
-    )
+      </span>
+    ))
     lastIndex = match.index + match[0].length
   }
   if (lastIndex < answer.length) {
     nodes.push(answer.slice(lastIndex))
   }
   return nodes
+}
+
+function upsertVoiceSegment(segments: VoiceSegment[], next: VoiceSegment) {
+  const bySequence = new Map(segments.map((segment) => [segment.sequence, segment]))
+  bySequence.set(next.sequence, next)
+  return [...bySequence.values()].sort((left, right) => left.sequence - right.sequence)
 }
 
 function formatInstructionAnswer(funcCall?: FuncCallData) {
@@ -2078,6 +2051,8 @@ function summarizeStageEvent(payload: QueryEventEnvelope) {
 
 function stageLabel(stage: string) {
   const mapping: Record<string, string> = {
+    recording: '正在录音',
+    sending: '正在思考',
     received: '已接收',
     instruction: '指令识别',
     direct_decision: '直答判断',
@@ -2088,6 +2063,17 @@ function stageLabel(stage: string) {
     cancelled: '已取消',
   }
   return mapping[stage] || stage
+}
+
+function answerSourceLabel(source: AnswerSource, status: TurnStatus) {
+  const mapping: Record<AnswerSource, string> = {
+    '': stageLabel(status),
+    instruction: '实验指令',
+    direct: '直接回答',
+    rag: '知识库回答',
+    error: status === 'cancelled' ? '已取消' : '回答失败',
+  }
+  return mapping[source]
 }
 
 function voiceStatusLabel(phase: string, fallback: string) {
@@ -2136,13 +2122,14 @@ function normalizeReferences(value: unknown): CitationReference[] {
 
 function normalizeReference(value: unknown): CitationReference {
   const source = toJsonRecord(value)
+  const documentId = stringValue(source.document_id)
   return {
     citation_index: numberOrUndefined(source.citation_index),
     chunk_id: stringValue(source.chunk_id),
     dataset_id: stringValue(source.dataset_id),
     dataset_name: stringValue(source.dataset_name),
-    document_id: stringValue(source.document_id),
-    document_name: stringValue(source.document_name),
+    document_id: documentId,
+    document_name: stringValue(source.document_name) || documentId || '未命名文档',
     content: stringValue(source.content),
     page_numbers: toNumberArray(source.page_numbers),
     positions: toNumberArray(source.positions),
@@ -2230,16 +2217,25 @@ function safeParseJson(value: unknown) {
 
 function viewFromPath(pathname: string): ViewKey {
   const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
-  if (normalized === '/history') {
+  if (normalized === '/history' || normalized === '/admin/history') {
     return 'history'
   }
-  if (normalized === '/system') {
+  if (normalized === '/system' || normalized === '/admin/system') {
     return 'system'
   }
-  if (normalized === '/knowledge') {
+  if (
+    normalized === '/knowledge' ||
+    normalized === '/admin' ||
+    normalized === '/admin/knowledge'
+  ) {
     return 'knowledge'
   }
   return 'assistant'
+}
+
+function isLegacyManagementPath(pathname: string) {
+  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  return normalized === '/history' || normalized === '/system' || normalized === '/knowledge'
 }
 
 function currentSessionId() {

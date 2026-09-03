@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { App } from './App'
+import { App, TurnCard } from './App'
 
 type HistoryReference = {
   citation_index: number
@@ -163,22 +163,24 @@ describe('App', () => {
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: '生物安全实验助手' })).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '选择实验场景' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '实验场景' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: '管理导航' })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('textbox', { name: '问题' }), {
       target: { value: '新冠活病毒培养需要什么实验室？' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '问题' }), { key: 'Enter' })
 
-    expect(
-      await screen.findByText((_, node) => {
-        return (
-          node?.tagName.toLowerCase() === 'p' &&
-          node.textContent?.includes('新冠活病毒培养应在生物安全三级实验室进行。') === true
-        )
-      }),
-    ).toBeInTheDocument()
+    const answer = await screen.findByText((_, node) => {
+      return (
+        node?.tagName.toLowerCase() === 'p' &&
+        node.textContent?.includes('新冠活病毒培养应在生物安全三级实验室进行。') === true
+      )
+    })
+    const turn = answer.closest('article')
+    expect(turn).not.toBeNull()
+    expect(turn!.querySelector('.user-message')?.textContent).toContain('新冠活病毒培养需要什么实验室？')
+    expect(turn!.querySelector('.assistant-message')?.textContent).toContain('知识库回答')
 
     fireEvent.click(screen.getAllByRole('button', { name: '[1]fixture.txt' })[0])
 
@@ -188,11 +190,11 @@ describe('App', () => {
   })
 
   it('shows history detail and saves a correction', async () => {
+    window.history.replaceState({}, '', '/admin/history')
     render(<App />)
 
-    fireEvent.click(screen.getByRole('link', { name: '历史记录' }))
-
     expect(await screen.findByRole('heading', { name: '记录与纠错' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: '管理导航' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '新冠活病毒培养需要什么实验室？' })).toBeInTheDocument()
 
     fireEvent.click(
@@ -222,14 +224,54 @@ describe('App', () => {
   })
 
   it('keeps knowledge management on its own route', async () => {
+    window.history.replaceState({}, '', '/admin/knowledge')
     render(<App />)
 
-    fireEvent.click(screen.getByRole('link', { name: '知识库' }))
-
-    expect(window.location.pathname).toBe('/knowledge')
+    expect(window.location.pathname).toBe('/admin/knowledge')
     expect(screen.getByRole('heading', { level: 1, name: '知识库管理' })).toBeInTheDocument()
     expect(screen.getByText(/BIOSAFE_ADMIN_PASSWORD/)).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '问题' })).not.toBeInTheDocument()
+  })
+
+  it('redirects legacy management routes to the admin entry', async () => {
+    window.history.replaceState({}, '', '/history')
+    render(<App />)
+
+    await waitFor(() => expect(window.location.pathname).toBe('/admin/history'))
+    expect(screen.getByRole('navigation', { name: '管理导航' })).toBeInTheDocument()
+  })
+
+  it('shows a playing waveform and ordered voice subtitle chunks', () => {
+    const onOpenReference = vi.fn()
+    render(
+      <TurnCard
+        turn={{
+          id: 'voice-turn',
+          inputMode: 'voice',
+          status: 'completed',
+          question: '语音问题',
+          transcript: '语音问题',
+          answerSource: 'rag',
+          answer: '第一段回答 [1]。第二段回答 [1]。',
+          voiceSegments: [
+            { sequence: 1, text: '第二段回答 [1]。' },
+            { sequence: 0, text: '第一段回答 [1]。' },
+          ],
+          voicePlayback: 'playing',
+          references: [reference],
+          timeline: [],
+          rawEvents: [],
+          createdAt: Date.now(),
+        }}
+        onOpenReference={onOpenReference}
+      />,
+    )
+
+    expect(screen.getByLabelText('正在播放语音')).toBeInTheDocument()
+    const subtitles = screen.getByLabelText('语音回答字幕')
+    expect(subtitles.textContent).toContain('第一段回答 [1]fixture.txt。第二段回答 [1]fixture.txt。')
+    fireEvent.click(screen.getAllByRole('button', { name: '引用 1，fixture.txt' })[0])
+    expect(onOpenReference).toHaveBeenCalledWith(expect.objectContaining({ document_name: 'fixture.txt' }))
   })
 })
 
