@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 
+from biosafe.application.correction_dispatcher import CorrectionDispatcherProtocol
 from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.funcall_detector import detect_funcall
 from biosafe.domain.history import AnswerSource, HistoryCreate
@@ -63,6 +64,7 @@ class QueryService:
         retrieval_page_size: int = 8,
         similarity_threshold: float = 0.2,
         vector_similarity_weight: float = 0.3,
+        correction_dispatcher: CorrectionDispatcherProtocol | None = None,
     ):
         self._history_repository = history_repository
         self._binding_repository = binding_repository
@@ -73,6 +75,7 @@ class QueryService:
         self._retrieval_page_size = retrieval_page_size
         self._similarity_threshold = similarity_threshold
         self._vector_similarity_weight = vector_similarity_weight
+        self._correction_dispatcher = correction_dispatcher
 
     async def answer_text(
         self,
@@ -551,7 +554,7 @@ class QueryService:
         error_code: str = "",
         error_message: str = "",
     ):
-        return self._history_repository.create(
+        history = self._history_repository.create(
             HistoryCreate(
                 request_id=request.request_id,
                 session_id=request.session_id,
@@ -569,6 +572,20 @@ class QueryService:
                 error_message=error_message,
             )
         )
+        if (
+            self._correction_dispatcher is not None
+            and status == "completed"
+            and answer_source in {AnswerSource.DIRECT.value, AnswerSource.RAG.value}
+            and system_answer.strip()
+        ):
+            try:
+                self._correction_dispatcher.submit(history)
+            except Exception:
+                logger.exception(
+                    "answer correction submission failed",
+                    extra={"request_id": request.request_id, "details": {"history_id": history.id}},
+                )
+        return history
 
 
 def _parse_direct_decision(raw_response: str) -> DirectDecision:

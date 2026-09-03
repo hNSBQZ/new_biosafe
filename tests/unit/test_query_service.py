@@ -8,6 +8,7 @@ import pytest
 
 from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.query_service import QueryService
+from biosafe.domain.history import ChatHistory
 from biosafe.domain.query import QueryRequest
 from biosafe.integrations.llm import LLMError
 from biosafe.integrations.ragflow.models import RetrievedChunk
@@ -62,6 +63,15 @@ class FakeRAGFlow:
         return self.chunks
 
 
+class FakeCorrectionDispatcher:
+    def __init__(self) -> None:
+        self.histories: list[ChatHistory] = []
+
+    def submit(self, history: ChatHistory, *, retry: bool = False):
+        self.histories.append(history)
+        return None
+
+
 def _chunk() -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id="chunk-1",
@@ -81,6 +91,7 @@ def _service(
     llm: FakeLLM,
     ragflow: FakeRAGFlow,
     default_dataset_ids: tuple[str, ...] = ("dataset-1",),
+    correction_dispatcher: FakeCorrectionDispatcher | None = None,
 ) -> tuple[QueryService, HistoryRepository]:
     database = Database(tmp_path / "query.db")
     database.migrate()
@@ -92,6 +103,7 @@ def _service(
         llm_client=llm,
         ragflow_client=ragflow,  # type: ignore[arg-type]
         default_dataset_ids=default_dataset_ids,
+        correction_dispatcher=correction_dispatcher,
     )
     return service, history_repository
 
@@ -119,10 +131,12 @@ async def test_instruction_path_records_func_call_without_llm(tmp_path: Path) ->
 
 @pytest.mark.asyncio
 async def test_direct_path_records_answer(tmp_path: Path) -> None:
+    correction_dispatcher = FakeCorrectionDispatcher()
     service, history = _service(
         tmp_path,
         llm=FakeLLM(['{"decision":"direct","answer":"根据当前实验，应先检查防护装备。"}']),
         ragflow=FakeRAGFlow([]),
+        correction_dispatcher=correction_dispatcher,
     )
 
     events = await _collect(service, QueryRequest(question="麻醉时注意什么？", request_id="req-2"))
@@ -134,6 +148,7 @@ async def test_direct_path_records_answer(tmp_path: Path) -> None:
     assert saved is not None
     assert saved.answer_source == "direct"
     assert saved.status == "completed"
+    assert [item.id for item in correction_dispatcher.histories] == [saved.id]
 
 
 @pytest.mark.asyncio
@@ -180,10 +195,12 @@ async def test_direct_decision_parse_failure_defaults_to_rag(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_empty_ragflow_retrieval_is_failed_history(tmp_path: Path) -> None:
+    correction_dispatcher = FakeCorrectionDispatcher()
     service, history = _service(
         tmp_path,
         llm=FakeLLM(['{"decision":"need_rag"}']),
         ragflow=FakeRAGFlow([]),
+        correction_dispatcher=correction_dispatcher,
     )
 
     events = await _collect(service, QueryRequest(question="法规依据是什么？", request_id="req-5"))
@@ -194,6 +211,7 @@ async def test_empty_ragflow_retrieval_is_failed_history(tmp_path: Path) -> None
     assert saved is not None
     assert saved.answer_source == "rag"
     assert saved.status == "failed"
+    assert correction_dispatcher.histories == []
 
 
 @pytest.mark.asyncio

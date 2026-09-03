@@ -9,25 +9,38 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from biosafe import __version__
+from biosafe.application.correction_dispatcher import AnswerCorrectionDispatcher
 from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.query_service import QueryService
 from biosafe.auth import hash_password
 from biosafe.config import Settings
 from biosafe.integrations.asr import ASRClient
+from biosafe.integrations.correction import OpenAIAnswerCorrectionClient
 from biosafe.integrations.llm import OpenAIChatClient
 from biosafe.integrations.ragflow import RAGFlowClient
 from biosafe.integrations.tts import TTSClient
 from biosafe.logging import configure_logging
-from biosafe.storage import AdminRepository, BindingRepository, Database, HistoryRepository
+from biosafe.storage import (
+    AdminRepository,
+    AnswerCorrectionRepository,
+    BindingRepository,
+    Database,
+    HistoryRepository,
+)
 from services.api.routes import admin, audio, chat, experiments, history
 from services.audio import AudioPipeline
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    yield
-    await app.state.ragflow_client.close()
-    await app.state.tts_client.close()
+    await app.state.correction_dispatcher.start()
+    try:
+        yield
+    finally:
+        await app.state.correction_dispatcher.close()
+        await app.state.correction_client.close()
+        await app.state.ragflow_client.close()
+        await app.state.tts_client.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -40,12 +53,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = database
     app.state.admin_repository = AdminRepository(database)
     app.state.history_repository = HistoryRepository(database)
+    app.state.correction_repository = AnswerCorrectionRepository(database)
     app.state.binding_repository = BindingRepository(database)
     app.state.experiment_prompt_store = ExperimentPromptStore(resolved.experiments_dir)
     app.state.llm_client = OpenAIChatClient(resolved.llm)
     app.state.ragflow_client = RAGFlowClient(resolved.ragflow)
     app.state.asr_client = ASRClient(resolved.asr)
     app.state.tts_client = TTSClient(resolved.tts)
+    app.state.correction_client = OpenAIAnswerCorrectionClient(resolved.correction)
+    app.state.correction_dispatcher = AnswerCorrectionDispatcher(
+        repository=app.state.correction_repository,
+        client=app.state.correction_client,
+        config=resolved.correction,
+    )
     app.state.query_service = QueryService(
         history_repository=app.state.history_repository,
         binding_repository=app.state.binding_repository,
@@ -53,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         llm_client=app.state.llm_client,
         ragflow_client=app.state.ragflow_client,
         default_dataset_ids=resolved.ragflow.dataset_ids,
+        correction_dispatcher=app.state.correction_dispatcher,
     )
     app.state.audio_pipeline = AudioPipeline(
         asr_client=app.state.asr_client,

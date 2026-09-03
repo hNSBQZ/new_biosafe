@@ -22,6 +22,17 @@ def _float(env: Mapping[str, str], name: str, default: float) -> float:
     return float(raw) if raw else default
 
 
+def _boolean(env: Mapping[str, str], name: str, default: bool = False) -> bool:
+    raw = _value(env, name)
+    if not raw:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def _alias(env: Mapping[str, str], primary: str, legacy: str, default: str = "") -> str:
+    return _value(env, primary) or _value(env, legacy, default)
+
+
 def _csv(env: Mapping[str, str], name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     raw = _value(env, name)
     return tuple(part.strip() for part in raw.split(",") if part.strip()) if raw else default
@@ -88,6 +99,22 @@ class AdminConfig:
 
 
 @dataclass(frozen=True)
+class CorrectionConfig:
+    enabled: bool = False
+    base_url: str = ""
+    api_key: str = field(default="", repr=False)
+    model: str = ""
+    timeout_seconds: float = 120.0
+    queue_maxsize: int = 200
+    worker_count: int = 2
+    drain_timeout_seconds: float = 30.0
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.enabled and self.base_url and self.api_key and self.model)
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: str = "development"
     database_path: Path = Path("data/biosafe.db")
@@ -100,6 +127,7 @@ class Settings:
     asr: ASRConfig = field(default_factory=ASRConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     admin: AdminConfig = field(default_factory=AdminConfig)
+    correction: CorrectionConfig = field(default_factory=CorrectionConfig)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -144,5 +172,51 @@ class Settings:
                 password=_value(source, "BIOSAFE_ADMIN_PASSWORD"),
                 token_secret=_value(source, "BIOSAFE_ADMIN_TOKEN_SECRET"),
                 token_ttl_seconds=_integer(source, "BIOSAFE_ADMIN_TOKEN_TTL_SECONDS", 28_800),
+            ),
+            correction=CorrectionConfig(
+                enabled=_boolean(
+                    source,
+                    "CORRECTION_ENABLED",
+                    _boolean(source, "EVAL_ENABLED", False),
+                ),
+                base_url=_alias(
+                    source, "CORRECTION_BASE_URL", "ANSWER_EVALUATION_BASE_URL"
+                ).rstrip("/"),
+                api_key=_alias(
+                    source, "CORRECTION_API_KEY", "ANSWER_EVALUATION_API_KEY"
+                ),
+                model=_alias(source, "CORRECTION_MODEL", "ANSWER_EVALUATION_MODEL"),
+                timeout_seconds=max(
+                    1.0,
+                    _float(
+                        source,
+                        "CORRECTION_TIMEOUT_SECONDS",
+                        _float(source, "EVAL_REQUEST_TIMEOUT", 120.0),
+                    ),
+                ),
+                queue_maxsize=max(
+                    1,
+                    _integer(
+                        source,
+                        "CORRECTION_QUEUE_MAXSIZE",
+                        _integer(source, "EVAL_QUEUE_MAXSIZE", 200),
+                    ),
+                ),
+                worker_count=max(
+                    1,
+                    _integer(
+                        source,
+                        "CORRECTION_WORKER_COUNT",
+                        _integer(source, "EVAL_WORKER_COUNT", 2),
+                    ),
+                ),
+                drain_timeout_seconds=max(
+                    0.0,
+                    _float(
+                        source,
+                        "CORRECTION_DRAIN_TIMEOUT_SECONDS",
+                        _float(source, "EVAL_DRAIN_TIMEOUT", 30.0),
+                    ),
+                ),
             ),
         )

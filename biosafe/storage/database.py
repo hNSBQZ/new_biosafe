@@ -57,6 +57,29 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS answer_correction (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id INTEGER NOT NULL UNIQUE,
+            question TEXT NOT NULL,
+            original_answer TEXT NOT NULL,
+            status TEXT NOT NULL,
+            model TEXT NOT NULL DEFAULT '',
+            can_answer INTEGER,
+            answer TEXT NOT NULL DEFAULT '',
+            cannot_answer_reason TEXT NOT NULL DEFAULT '',
+            citations_json TEXT NOT NULL DEFAULT '[]',
+            error TEXT NOT NULL DEFAULT '',
+            enqueued_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_answer_correction_status
+        ON answer_correction(status, enqueued_at);
+        """,
+    ),
 )
 
 

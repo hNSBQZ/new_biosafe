@@ -16,6 +16,9 @@ QueryService
   |-- AnswerSynthesizer -> LLM + citation markers
   `-- HistoryRepository -> one SQLite database
 
+AnswerCorrectionDispatcher -> bounded async queue -> independent LLM + web search
+                           `-> correction audit in the same SQLite database
+
 VoiceSession: browser audio -> existing ASR -> QueryService -> existing TTS -> browser
 KnowledgeAdminService -> RAGFlow datasets/documents/parsing status
 ```
@@ -92,6 +95,12 @@ source_url, raw_metadata
 
 `id, experiment_id, dataset_id, dataset_name_snapshot, enabled, created_at, updated_at`
 
+### `answer_correction`
+
+`id, history_id(unique logical link), question, original_answer, status, model, can_answer, answer, cannot_answer_reason, citations_json, error, enqueued_at, started_at, finished_at`
+
+模型修正只保存独立回答和公开来源供展示、审计及人工采纳，不更新 `chat_history.corrected_answer`，不发布到 RAGFlow，也不参与 QueryService 的在线回答。
+
 不保存 RAGFlow 文档镜像表。知识管理页面实时读 RAGFlow；必要的异步轮询状态在进程内或短期 cache，不制造第二事实源。
 
 SQLite 迁移使用递增版本和 `schema_migration`，每次迁移可重复执行。JSON 字段写入前做 schema 校验，读取旧数据失败时返回空值并记录错误而不是让列表崩溃。
@@ -102,6 +111,7 @@ SQLite 迁移使用递增版本和 `schema_migration`，每次迁移可重复执
 - `WS /api/v1/chat/audio`：语音会话，复用旧协议时保留兼容说明。
 - `GET /api/experiments`：实验和绑定数据集。
 - `GET /api/history`、`GET /api/history/{id}`、`PATCH /api/history/{id}/correction`。
+- `POST /api/history/{id}/auto-correction`：为旧记录或失败任务重新提交异步模型修正。
 - `POST /api/admin/login`。
 - `GET/POST /api/admin/knowledge/datasets`。
 - `GET/POST/DELETE /api/admin/knowledge/datasets/{id}/documents...`。
@@ -112,7 +122,7 @@ SQLite 迁移使用递增版本和 `schema_migration`，每次迁移可重复执
 ## 前端视图
 
 - 助手：实验选择、消息流、录音控制、回答路径状态、内联引用和引用详情抽屉。
-- 历史：筛选/分页，原始问题、系统回答、纠错回答、引用快照，支持保存纠错。
+- 历史：筛选/分页，原始问题、系统回答、模型修正及公开来源、人工纠错、RAGFlow 引用快照，支持重新修正和保存人工纠错。
 - 知识库：数据集模板、文档上传、解析进度、失败重试、删除确认、检索预览。
 - 系统状态：后端、RAGFlow、ASR、TTS 健康状态，不能显示 secret 或完整内部异常。
 
@@ -123,4 +133,3 @@ SQLite 迁移使用递增版本和 `schema_migration`，每次迁移可重复执
 - ASR 或 TTS 失败不丢失文本问答：ASR 失败可重录，TTS 失败仍保留文本。
 - 前端取消时服务端停止后续合成/TTS并把记录标为 cancelled。
 - 日志 JSON 化并脱敏；健康接口不执行破坏性探测。
-

@@ -5,6 +5,23 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class AutoCorrectionItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    history_id: int
+    status: str
+    model: str
+    can_answer: bool | None
+    answer: str
+    cannot_answer_reason: str
+    citations: list[dict[str, Any]]
+    error: str
+    enqueued_at: str
+    started_at: str | None
+    finished_at: str | None
+
+
 class HistoryItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -25,6 +42,7 @@ class HistoryItem(BaseModel):
     error_code: str
     error_message: str
     correction_updated_at: str | None = None
+    auto_correction: AutoCorrectionItem | None = None
 
 
 class HistoryPage(BaseModel):

@@ -56,6 +56,28 @@ type HistoryItem = {
   error_code: string
   error_message: string
   correction_updated_at?: string | null
+  auto_correction?: AutoCorrection | null
+}
+
+type AutoCorrectionCitation = {
+  title: string
+  url: string
+  note: string
+}
+
+type AutoCorrection = {
+  id: number
+  history_id: number
+  status: string
+  model: string
+  can_answer: boolean | null
+  answer: string
+  cannot_answer_reason: string
+  citations: AutoCorrectionCitation[]
+  error: string
+  enqueued_at: string
+  started_at?: string | null
+  finished_at?: string | null
 }
 
 type HistoryPage = {
@@ -185,6 +207,7 @@ export function App() {
   const [selectedHistory, setSelectedHistory] = useState<HistoryItem | null>(null)
   const [historyCorrection, setHistoryCorrection] = useState('')
   const [savingCorrection, setSavingCorrection] = useState(false)
+  const [queueingCorrection, setQueueingCorrection] = useState(false)
   const [selectedReference, setSelectedReference] = useState<CitationReference | null>(null)
   const [selectedReferenceOrigin, setSelectedReferenceOrigin] = useState<'turn' | 'history'>(
     'turn',
@@ -265,6 +288,30 @@ export function App() {
       setHistoryCorrection(selectedHistory.corrected_answer || selectedHistory.system_answer)
     }
   }, [selectedHistory])
+
+  useEffect(() => {
+    const historyId = selectedHistoryId
+    const status = selectedHistory?.auto_correction?.status
+    if (historyId === null || (status !== 'pending' && status !== 'running')) {
+      return
+    }
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      void fetchHistoryDetail(historyId, controller.signal)
+        .then((payload) => {
+          setSelectedHistory((current) => (current?.id === historyId ? payload : current))
+          setHistoryPageData((current) => ({
+            ...current,
+            items: current.items.map((item) => (item.id === payload.id ? payload : item)),
+          }))
+        })
+        .catch(() => undefined)
+    }, 1500)
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [selectedHistoryId, selectedHistory?.auto_correction?.status])
 
   useEffect(() => {
     return () => {
@@ -359,14 +406,38 @@ export function App() {
 
   async function loadHistoryDetail(historyId: number) {
     try {
-      const response = await fetch(`/api/history/${historyId}`)
-      if (!response.ok) {
-        throw new Error(`history detail ${response.status}`)
-      }
-      const payload = (await response.json()) as HistoryItem
+      const payload = await fetchHistoryDetail(historyId)
       setSelectedHistory(payload)
     } catch (error) {
       setGlobalNotice(`历史详情加载失败：${describeError(error)}`)
+    }
+  }
+
+  async function enqueueAutoCorrection() {
+    if (selectedHistoryId === null) {
+      return
+    }
+    setQueueingCorrection(true)
+    try {
+      const response = await fetch(`/api/history/${selectedHistoryId}/auto-correction`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error(`auto correction ${response.status}`)
+      }
+      const correction = (await response.json()) as AutoCorrection
+      setSelectedHistory((current) => current ? { ...current, auto_correction: correction } : current)
+      setHistoryPageData((current) => ({
+        ...current,
+        items: current.items.map((item) => (
+          item.id === selectedHistoryId ? { ...item, auto_correction: correction } : item
+        )),
+      }))
+      setGlobalNotice('模型修正已入队')
+    } catch (error) {
+      setGlobalNotice(`模型修正提交失败：${describeError(error)}`)
+    } finally {
+      setQueueingCorrection(false)
     }
   }
 
@@ -1492,6 +1563,45 @@ export function App() {
                         <div className="detail-card">
                           <div className="panel-header slim">
                             <div>
+                              <p className="panel-kicker">自动修正</p>
+                              <h2>模型复核</h2>
+                            </div>
+                            <div className="toolbar compact-toolbar">
+                              {selectedHistory.auto_correction ? (
+                                <Pill tone={correctionTone(selectedHistory.auto_correction.status)}>
+                                  {correctionStatusLabel(selectedHistory.auto_correction.status)}
+                                </Pill>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                onClick={() => void enqueueAutoCorrection()}
+                                disabled={
+                                  queueingCorrection
+                                  || selectedHistory.auto_correction?.status === 'pending'
+                                  || selectedHistory.auto_correction?.status === 'running'
+                                  || selectedHistory.status !== 'completed'
+                                  || !['direct', 'rag'].includes(selectedHistory.answer_source)
+                                }
+                              >
+                                <RefreshCw aria-hidden="true" />
+                                {selectedHistory.auto_correction ? '重新修正' : '提交修正'}
+                              </button>
+                            </div>
+                          </div>
+                          {selectedHistory.auto_correction ? (
+                            <AutoCorrectionPanel
+                              correction={selectedHistory.auto_correction}
+                              onAdopt={(answer) => setHistoryCorrection(answer)}
+                            />
+                          ) : (
+                            <p className="correction-message">暂无模型修正记录</p>
+                          )}
+                        </div>
+
+                        <div className="detail-card">
+                          <div className="panel-header slim">
+                            <div>
                               <p className="panel-kicker">纠错</p>
                               <h2>编辑</h2>
                             </div>
@@ -1890,6 +2000,79 @@ function ReferenceButton({
   )
 }
 
+function AutoCorrectionPanel({
+  correction,
+  onAdopt,
+}: {
+  correction: AutoCorrection
+  onAdopt: (answer: string) => void
+}) {
+  const active = correction.status === 'pending' || correction.status === 'running'
+  const failed = ['parse_error', 'request_error', 'dropped'].includes(correction.status)
+  return (
+    <div className="auto-correction" aria-live="polite">
+      <div className="correction-meta">
+        <span>模型：{correction.model || '等待执行'}</span>
+        <span>入队：{correction.enqueued_at}</span>
+        {correction.finished_at ? <span>完成：{correction.finished_at}</span> : null}
+      </div>
+      {active ? (
+        <p className="correction-message">
+          {correction.status === 'pending' ? '等待模型复核' : '模型正在复核'}
+        </p>
+      ) : null}
+      {correction.status === 'success' && correction.can_answer && correction.answer ? (
+        <>
+          <div className="correction-answer">
+            <span className="mini-label">模型建议</span>
+            <p>{correction.answer}</p>
+          </div>
+          <button
+            type="button"
+            className="ghost-button adopt-correction"
+            onClick={() => onAdopt(correction.answer)}
+          >
+            <CheckCircle2 aria-hidden="true" />
+            采用模型建议
+          </button>
+        </>
+      ) : null}
+      {correction.status === 'success' && correction.can_answer === false ? (
+        <div className="correction-answer">
+          <span className="mini-label">无法可靠回答</span>
+          <p>{correction.cannot_answer_reason || '公开来源不足'}</p>
+        </div>
+      ) : null}
+      {failed ? (
+        <p className="correction-error">{correction.error || '模型修正失败'}</p>
+      ) : null}
+      {correction.citations.length > 0 ? (
+        <div className="correction-sources">
+          <span className="mini-label">公开来源</span>
+          {correction.citations.map((citation, index) => (
+            citation.url ? (
+              <a
+                key={`${citation.url}-${index}`}
+                href={citation.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <strong>{citation.title || `来源 ${index + 1}`}</strong>
+                {citation.note ? <span>{citation.note}</span> : null}
+              </a>
+            ) : (
+              <div key={`${citation.title}-${index}`} className="correction-source-text">
+                <strong>{citation.title || `来源 ${index + 1}`}</strong>
+                {citation.note ? <span>{citation.note}</span> : null}
+              </div>
+            )
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function Pill({
   tone,
   children,
@@ -2096,6 +2279,28 @@ function historyTone(status: string) {
   return 'neutral'
 }
 
+function correctionTone(status: string) {
+  if (status === 'success') {
+    return 'success'
+  }
+  if (status === 'pending' || status === 'running') {
+    return 'warning'
+  }
+  return 'danger'
+}
+
+function correctionStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: '等待中',
+    running: '复核中',
+    success: '已完成',
+    parse_error: '解析失败',
+    request_error: '请求失败',
+    dropped: '队列已满',
+  }
+  return labels[status] || status
+}
+
 function toneForTurn(turn: TurnRecord) {
   if (turn.status === 'completed') {
     return 'success'
@@ -2202,6 +2407,14 @@ function describeError(error: unknown) {
     return error.message
   }
   return String(error)
+}
+
+async function fetchHistoryDetail(historyId: number, signal?: AbortSignal) {
+  const response = await fetch(`/api/history/${historyId}`, { signal })
+  if (!response.ok) {
+    throw new Error(`history detail ${response.status}`)
+  }
+  return (await response.json()) as HistoryItem
 }
 
 function safeParseJson(value: unknown) {

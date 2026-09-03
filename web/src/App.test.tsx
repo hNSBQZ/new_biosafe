@@ -33,6 +33,20 @@ type HistoryPayload = {
   error_code: string
   error_message: string
   correction_updated_at?: string | null
+  auto_correction?: {
+    id: number
+    history_id: number
+    status: string
+    model: string
+    can_answer: boolean | null
+    answer: string
+    cannot_answer_reason: string
+    citations: { title: string; url: string; note: string }[]
+    error: string
+    enqueued_at: string
+    started_at?: string | null
+    finished_at?: string | null
+  } | null
 }
 
 const experimentResponse = {
@@ -81,6 +95,26 @@ const historyItem: HistoryPayload = {
   status: 'completed',
   error_code: '',
   error_message: '',
+  auto_correction: {
+    id: 3,
+    history_id: 11,
+    status: 'success',
+    model: 'strong-model',
+    can_answer: true,
+    answer: '模型复核建议：应在生物安全三级实验室进行。',
+    cannot_answer_reason: '',
+    citations: [
+      {
+        title: '生物安全标准',
+        url: 'https://example.test/standard',
+        note: '活病毒培养设施要求',
+      },
+    ],
+    error: '',
+    enqueued_at: '2026-08-28T09:00:01Z',
+    started_at: '2026-08-28T09:00:02Z',
+    finished_at: '2026-08-28T09:00:05Z',
+  },
 }
 
 const chatSse = [
@@ -136,6 +170,18 @@ beforeEach(() => {
           },
           200,
         )
+      }
+
+      if (path === '/api/history/11/auto-correction' && method === 'POST') {
+        return jsonResponse({
+          ...historyItem.auto_correction,
+          status: 'pending',
+          answer: '',
+          citations: [],
+          model: '',
+          can_answer: null,
+          finished_at: null,
+        })
       }
 
       if (path === '/api/chat' && method === 'POST') {
@@ -208,6 +254,33 @@ describe('App', () => {
 
     expect(await screen.findByText('人工纠错答案')).toBeInTheDocument()
     expect(screen.getByText('2026-08-28T10:00:00Z')).toBeInTheDocument()
+  })
+
+  it('shows the model correction and only adopts it into the manual editor', async () => {
+    window.history.replaceState({}, '', '/admin/history')
+    render(<App />)
+
+    expect(await screen.findByText('模型复核建议：应在生物安全三级实验室进行。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /生物安全标准/ })).toHaveAttribute(
+      'href',
+      'https://example.test/standard',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '采用模型建议' }))
+
+    expect(screen.getByLabelText('纠错内容')).toHaveValue(
+      '模型复核建议：应在生物安全三级实验室进行。',
+    )
+    const patchCalls = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PATCH')
+    expect(patchCalls).toHaveLength(0)
+  })
+
+  it('can requeue a model correction', async () => {
+    window.history.replaceState({}, '', '/admin/history')
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '重新修正' }))
+
+    expect(await screen.findByText('等待中')).toBeInTheDocument()
   })
 
   it('handles missing microphone support', async () => {

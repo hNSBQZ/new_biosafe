@@ -1,8 +1,10 @@
 from fastapi import Request
 
+from biosafe.application.correction_dispatcher import AnswerCorrectionDispatcher
 from biosafe.application.experiment_prompts import ExperimentPromptStore
 from biosafe.application.query_service import QueryService
 from biosafe.storage.admin_repository import AdminRepository, BindingRepository
+from biosafe.storage.correction_repository import AnswerCorrectionRepository
 from biosafe.storage.history_repository import HistoryRepository
 from services.audio import AudioPipeline
 
@@ -29,3 +31,11 @@ async def get_query_service(request: Request) -> QueryService:
 
 async def get_audio_pipeline(request: Request) -> AudioPipeline:
     return request.app.state.audio_pipeline
+
+
+async def get_correction_repository(request: Request) -> AnswerCorrectionRepository:
+    return request.app.state.correction_repository
+
+
+async def get_correction_dispatcher(request: Request) -> AnswerCorrectionDispatcher:
+    return request.app.state.correction_dispatcher

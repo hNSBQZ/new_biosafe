@@ -277,6 +277,10 @@ svg {
   flex-wrap: wrap;
 }
 
+.compact-toolbar {
+  justify-content: flex-end;
+}
+
 .scenario-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -793,6 +797,66 @@ svg {
 .detail-grid > div,
 .mini-panel {
   padding: 12px;
+}
+
+.auto-correction {
+  display: grid;
+  gap: 12px;
+}
+
+.correction-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: #65726d;
+  font-size: 12px;
+}
+
+.correction-message,
+.correction-error,
+.correction-answer p {
+  margin: 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.correction-message {
+  color: #5d6964;
+}
+
+.correction-error {
+  color: #9b1d2d;
+}
+
+.correction-answer {
+  display: grid;
+  gap: 6px;
+}
+
+.adopt-correction {
+  justify-self: start;
+}
+
+.correction-sources {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #e0e7e3;
+}
+
+.correction-sources a,
+.correction-source-text {
+  display: grid;
+  gap: 2px;
+  color: #235f49;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.correction-sources a span,
+.correction-source-text span {
+  color: #5d6964;
 }
 
 .mini-panel strong {

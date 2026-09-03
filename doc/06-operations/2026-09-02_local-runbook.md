@@ -47,6 +47,18 @@ Vite 把 `/api` 和 `/health` 代理到本机 8000 端口，其中 `/api` 显式
 
 密码只在应用启动时读取并哈希写入 `admin_user`。修改 `.env` 后必须重启 API。浏览器只在 localStorage 保存有过期时间的签名 token，不保存密码。
 
+## 异步答案修正
+
+答案修正默认关闭。启用时必须配置：
+
+- `CORRECTION_ENABLED=true`
+- `CORRECTION_BASE_URL`、`CORRECTION_API_KEY`、`CORRECTION_MODEL`
+- `CORRECTION_TIMEOUT_SECONDS`、`CORRECTION_QUEUE_MAXSIZE`、`CORRECTION_WORKER_COUNT`、`CORRECTION_DRAIN_TIMEOUT_SECONDS`
+
+为兼容旧项目，本地环境也可继续使用 `ANSWER_EVALUATION_BASE_URL`、`ANSWER_EVALUATION_API_KEY`、`ANSWER_EVALUATION_MODEL` 与 `EVAL_*` 队列变量；同名 `CORRECTION_*` 优先。服务启动后，成功的 direct/RAG 历史会自动入队。管理端 `/admin/history` 展示模型建议和来源，并允许重新提交；“采用模型建议”只填入人工编辑框，仍需显式保存。
+
+`request_error` 表示模型鉴权、网络或超时失败，`parse_error` 表示模型没有返回要求的 JSON，`dropped` 表示队列容量不足。修正失败不影响原问答。应用重启会恢复 `pending/running` 任务，关闭时最多等待配置的 drain timeout。
+
 ## 日志
 
 默认文件为 `logs/biosafe-api.log`，由 `BIOSAFE_LOG_FILE` 调整。日志同时写 stderr，采用 JSON 行格式，单文件上限 10 MiB，保留 5 个滚动备份。

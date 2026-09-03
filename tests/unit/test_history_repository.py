@@ -5,6 +5,7 @@ from pathlib import Path
 
 from biosafe.domain.history import HistoryCreate
 from biosafe.storage import Database, HistoryRepository
+from biosafe.storage.database import MIGRATIONS
 
 
 def _item(index: int) -> HistoryCreate:
@@ -39,7 +40,10 @@ def test_migration_is_repeatable_and_corrupt_json_does_not_break_reads(tmp_path:
     assert loaded.references == []
     assert loaded.latency == {}
     with database.connection() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM schema_migration").fetchone()[0] == 1
+        assert (
+            connection.execute("SELECT COUNT(*) FROM schema_migration").fetchone()[0]
+            == len(MIGRATIONS)
+        )
 
 
 def test_concurrent_writes_are_serialized(tmp_path: Path) -> None:

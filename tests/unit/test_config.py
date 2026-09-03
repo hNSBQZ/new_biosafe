@@ -11,6 +11,11 @@ def test_settings_read_secrets_without_exposing_repr() -> None:
             "CHAT_BASE_URL": "http://llm.test/v1/",
             "CHAT_API_KEY": "llm-secret",
             "CHAT_MODEL": "test-model",
+            "ANSWER_EVALUATION_BASE_URL": "http://correction.test/v1/",
+            "ANSWER_EVALUATION_API_KEY": "correction-secret",
+            "ANSWER_EVALUATION_MODEL": "strong-model",
+            "EVAL_ENABLED": "true",
+            "EVAL_QUEUE_MAXSIZE": "7",
         }
     )
 
@@ -18,6 +23,10 @@ def test_settings_read_secrets_without_exposing_repr() -> None:
     assert str(settings.log_file) == "/tmp/biosafe-test.log"
     assert settings.tts.sample_rate == 22_050
     assert settings.llm.ready is True
+    assert settings.correction.ready is True
+    assert settings.correction.base_url == "http://correction.test/v1"
+    assert settings.correction.queue_maxsize == 7
     rendered = repr(settings)
     assert "rag-secret" not in rendered
     assert "llm-secret" not in rendered
+    assert "correction-secret" not in rendered
