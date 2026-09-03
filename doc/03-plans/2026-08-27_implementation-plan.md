@@ -77,6 +77,9 @@
 ## Phase 6 - 集成、部署与最终验收（IN_PROGRESS）
 
 - 整理 requirements、前端 lockfile、Docker Compose、健康检查和运行文档。
+- `IN_PROGRESS`：将助手重构为连续对话首屏，并把历史纠错、系统状态和知识库管理收敛到独立 `/admin/` 管理入口。
+- `IN_PROGRESS`：语音回答增加播放波形与逐分片字幕；RAG 合成使用句级引用修复与 coverage warning，硬校验保留至少一个有效引用且编号不越界，引用标号直接关联并展示 RAGFlow 文档名。
+- `IN_PROGRESS`：引用合成失败时记录脱敏的 LLM 首稿、修复稿、未引用片段和 chunk/document 映射，补足运行时诊断证据。
 - 校验从旧 `.env` 复用服务配置但不复制 secret；补齐管理员初始化和 token 生命周期。
 - 运行后端全量测试、前端测试/build、RAGFlow live smoke、文本/语音/管理 Playwright E2E。
 - 检查 Git 历史和工作树没有 secret、数据库、日志或大产物。
