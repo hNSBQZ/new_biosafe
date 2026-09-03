@@ -34,16 +34,20 @@ logger = logging.getLogger(__name__)
 CancelChecker = Callable[[], bool | Awaitable[bool]]
 
 _CITATION_PATTERN = re.compile(r"\[(\d{1,3})\]")
+_ANSWER_SEGMENT_PATTERN = re.compile(r"[^。！？!?；;\n]+[。！？!?；;]?|\n")
 
-_RAG_SYSTEM_PROMPT = """\
-你是一名生物安全领域的专业助手。请严格根据参考资料回答用户问题。
-
-规则：
-1. 只能使用参考资料中的信息，不要编造来源或事实。
-2. 每个关键结论必须使用 [n] 引用，n 对应参考资料编号。
-3. 如果资料不足以回答，请说明资料不足，并引用能支持该判断的资料。
-4. 回答使用中文自然句，避免 Markdown 标题、项目符号和链接。
-"""
+_RAG_SYSTEM_PROMPT = (
+    "你是一名生物安全领域的专业助手。请严格根据参考资料回答用户问题。\n\n"
+    "规则：\n"
+    "1. 只能使用参考资料中的信息，不要编造来源或事实。\n"
+    "2. 每个可核查的事实、数字、操作要求、风险和结论都必须在该句末尾立即使用 "
+    "[n] 引用，n 对应参考资料编号。\n"
+    "3. 不要只在段落末尾放一个总引用；同一资料支持多个句子时，每个句子都重复标注。"
+    "多个资料共同支持时写成 [1][2]。\n"
+    "4. 如果资料不足以回答，请说明资料不足，并引用能支持该判断的资料。\n"
+    "5. 回答使用中文自然句，避免 Markdown 标题、项目符号和链接；"
+    "不得输出参考资料中不存在的文档名。\n"
+)
 
 
 class QueryService:
@@ -225,10 +229,16 @@ class QueryService:
 
             yield make_event("stage", QueryStage.SYNTHESIZING, {"chunk_count": len(chunks)})
             synthesis_started = perf_counter()
-            system_answer = await self._synthesize(request.question, chunks)
+            try:
+                system_answer = await self._synthesize(
+                    request.question,
+                    chunks,
+                    request_id=request.request_id,
+                )
+            finally:
+                latency["synthesis_ms"] = _elapsed_ms(synthesis_started)
             citation_numbers = _citation_numbers(system_answer)
             references = _references_for_citations(chunks, citation_numbers)
-            latency["synthesis_ms"] = _elapsed_ms(synthesis_started)
             latency["total_ms"] = _elapsed_ms(started_at)
             history = self._write_history(
                 request=request,
@@ -283,6 +293,23 @@ class QueryService:
                 status="failed",
                 error_code=exc.code,
                 error_message=exc.message,
+            )
+            logger.warning(
+                "query failed",
+                extra={
+                    "request_id": request.request_id,
+                    "stage": current_stage,
+                    "error_code": exc.code,
+                    "details": {
+                        "history_id": history.id,
+                        "answer_source": exc.answer_source,
+                        "input_mode": request.input_mode,
+                        "experiment_id": request.experiment_id,
+                        "question": request.question,
+                        "latency": latency,
+                        "ragflow_request": ragflow_request,
+                    },
+                },
             )
             yield make_event(
                 "failed",
@@ -347,7 +374,13 @@ class QueryService:
         except RAGFlowError as exc:
             raise QueryFailure(exc.code, str(exc), answer_source=AnswerSource.RAG.value) from exc
 
-    async def _synthesize(self, question: str, chunks: list[RetrievedChunk]) -> str:
+    async def _synthesize(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        *,
+        request_id: str,
+    ) -> str:
         try:
             answer = await self._llm.complete(
                 _build_rag_messages(question, chunks),
@@ -360,6 +393,14 @@ class QueryService:
 
         citation_numbers = _citation_numbers(answer)
         if not citation_numbers:
+            self._log_citation_issue(
+                message="RAG citation validation failed",
+                request_id=request_id,
+                question=question,
+                code="rag_citation_missing",
+                chunks=chunks,
+                initial_draft=answer,
+            )
             raise QueryFailure(
                 "rag_citation_missing",
                 "Synthesized answer did not include a verifiable citation",
@@ -367,12 +408,129 @@ class QueryService:
             )
         invalid = [number for number in citation_numbers if number < 1 or number > len(chunks)]
         if invalid:
+            self._log_citation_issue(
+                message="RAG citation validation failed",
+                request_id=request_id,
+                question=question,
+                code="rag_citation_invalid",
+                chunks=chunks,
+                initial_draft=answer,
+            )
             raise QueryFailure(
                 "rag_citation_invalid",
                 "Synthesized answer cited a chunk that was not retrieved",
                 answer_source=AnswerSource.RAG.value,
             )
+        uncited_segments = _uncited_answer_segments(answer)
+        if uncited_segments:
+            initial_draft = answer
+            answer = await self._repair_citations(question, chunks, answer)
+            citation_numbers = _citation_numbers(answer)
+            invalid = [number for number in citation_numbers if number < 1 or number > len(chunks)]
+            if not citation_numbers:
+                self._log_citation_issue(
+                    message="RAG citation validation failed",
+                    request_id=request_id,
+                    question=question,
+                    code="rag_citation_missing",
+                    chunks=chunks,
+                    initial_draft=initial_draft,
+                    repaired_draft=answer,
+                )
+                raise QueryFailure(
+                    "rag_citation_missing",
+                    "Synthesized answer did not include a verifiable citation",
+                    answer_source=AnswerSource.RAG.value,
+                )
+            if invalid:
+                self._log_citation_issue(
+                    message="RAG citation validation failed",
+                    request_id=request_id,
+                    question=question,
+                    code="rag_citation_invalid",
+                    chunks=chunks,
+                    initial_draft=initial_draft,
+                    repaired_draft=answer,
+                )
+                raise QueryFailure(
+                    "rag_citation_invalid",
+                    "Synthesized answer cited a chunk that was not retrieved",
+                    answer_source=AnswerSource.RAG.value,
+                )
+            if _uncited_answer_segments(answer):
+                self._log_citation_issue(
+                    message="RAG citation coverage incomplete",
+                    request_id=request_id,
+                    question=question,
+                    code="rag_citation_coverage_incomplete",
+                    chunks=chunks,
+                    initial_draft=initial_draft,
+                    repaired_draft=answer,
+                )
         return answer
+
+    def _log_citation_issue(
+        self,
+        *,
+        message: str,
+        request_id: str,
+        question: str,
+        code: str,
+        chunks: list[RetrievedChunk],
+        initial_draft: str,
+        repaired_draft: str | None = None,
+    ) -> None:
+        details: dict[str, Any] = {
+            "question": question,
+            "initial": _citation_diagnostics(initial_draft, chunks),
+            "chunks": [
+                {
+                    "citation_index": index,
+                    "chunk_id": chunk.chunk_id,
+                    "document_id": chunk.document_id,
+                    "document_name": chunk.document_name,
+                }
+                for index, chunk in enumerate(chunks, start=1)
+            ],
+        }
+        if repaired_draft is not None:
+            details["repaired"] = _citation_diagnostics(repaired_draft, chunks)
+        logger.warning(
+            message,
+            extra={
+                "request_id": request_id,
+                "stage": QueryStage.SYNTHESIZING.value,
+                "error_code": code,
+                "details": details,
+            },
+        )
+
+    async def _repair_citations(
+        self, question: str, chunks: list[RetrievedChunk], draft: str
+    ) -> str:
+        messages = _build_rag_messages(question, chunks)
+        messages.extend(
+            [
+                {"role": "assistant", "content": draft},
+                {
+                    "role": "user",
+                    "content": (
+                        "上面的草稿有可核查句子缺少就近引用。请只依据同一批参考资料重写，"
+                        "让每个事实、数字、操作要求、风险和结论所在句都以有效 [n] 结尾。"
+                        "不要增加新事实，也不要输出解释过程。"
+                    ),
+                },
+            ]
+        )
+        try:
+            return await self._llm.complete(
+                messages,
+                max_tokens=1024,
+                temperature=0.0,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            )
+        except LLMError as exc:
+            raise QueryFailure(exc.code, exc.message, answer_source=AnswerSource.RAG.value) from exc
 
     def _dataset_ids_for_experiment(self, experiment_id: str) -> list[str]:
         bindings = self._binding_repository.list_for_experiment(experiment_id)
@@ -452,6 +610,44 @@ def _build_rag_messages(question: str, chunks: list[RetrievedChunk]) -> list[dic
 
 def _citation_numbers(answer: str) -> list[int]:
     return [int(match) for match in _CITATION_PATTERN.findall(answer or "")]
+
+
+def _uncited_answer_segments(answer: str) -> list[str]:
+    uncited: list[str] = []
+    for match in _ANSWER_SEGMENT_PATTERN.finditer(answer or ""):
+        segment = match.group(0).strip()
+        if not segment or _CITATION_PATTERN.search(segment):
+            continue
+        plain = _CITATION_PATTERN.sub("", segment)
+        if _is_citation_exempt_segment(plain):
+            continue
+        substantive_chars = re.findall(r"[A-Za-z0-9\u4e00-\u9fff]", plain)
+        if len(substantive_chars) >= 8:
+            uncited.append(segment)
+    return uncited
+
+
+def _is_citation_exempt_segment(segment: str) -> bool:
+    normalized = re.sub(r"[\s*_#]+", "", segment).strip()
+    if normalized.endswith(("：", ":")):
+        return True
+    source_terms = ("参考资料", "现有资料", "检索资料", "提供的资料", "资料中")
+    insufficiency_terms = ("不足", "缺乏", "未包含", "未提供", "没有", "无法")
+    return any(term in normalized for term in source_terms) and any(
+        term in normalized for term in insufficiency_terms
+    )
+
+
+def _citation_diagnostics(answer: str, chunks: list[RetrievedChunk]) -> dict[str, Any]:
+    citation_numbers = _citation_numbers(answer)
+    return {
+        "draft": answer,
+        "citation_numbers": citation_numbers,
+        "invalid_citation_numbers": [
+            number for number in citation_numbers if number < 1 or number > len(chunks)
+        ],
+        "uncited_segments": _uncited_answer_segments(answer),
+    }
 
 
 def _references_for_citations(

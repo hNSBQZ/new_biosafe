@@ -48,6 +48,35 @@ async def test_retrieval_uses_original_question_and_normalizes_chunk() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retrieval_normalizes_ragflow_document_keyword_alias() -> None:
+    payload = {
+        "code": 0,
+        "data": {
+            "chunks": [
+                {
+                    "id": "chunk-alias",
+                    "knowledgebase_id": "dataset-alias",
+                    "doc_id": "document-alias",
+                    "document_keyword": "生物安全操作规程.pdf",
+                    "content_with_weight": "需要使用规定的个人防护装备。",
+                    "similarity": 0.88,
+                }
+            ]
+        },
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    config = RAGFlowConfig(base_url="http://ragflow.test", api_key="test-token")
+    async with RAGFlowClient(config, httpx.MockTransport(handler)) as client:
+        chunks = await client.retrieve("需要什么防护？", ["dataset-alias"])
+
+    assert chunks[0].dataset_id == "dataset-alias"
+    assert chunks[0].document_name == "生物安全操作规程.pdf"
+
+
+@pytest.mark.asyncio
 async def test_create_upload_parse_and_delete_contract(tmp_path: Path) -> None:
     seen: list[tuple[str, str, dict[str, object]]] = []
 

@@ -279,10 +279,19 @@ class RAGFlowClient:
             pages = [pages]
         return RetrievedChunk(
             chunk_id=str(item.get("id") or item.get("chunk_id") or ""),
-            dataset_id=str(item.get("dataset_id") or ""),
-            dataset_name=str(item.get("dataset_name") or ""),
+            dataset_id=_first_text(
+                item, metadata, "dataset_id", "knowledgebase_id", "kb_id"
+            ),
+            dataset_name=_first_text(item, metadata, "dataset_name", "knowledgebase_name"),
             document_id=str(item.get("document_id") or item.get("doc_id") or ""),
-            document_name=str(item.get("document_name") or item.get("doc_name") or ""),
+            document_name=_first_text(
+                item,
+                metadata,
+                "document_name",
+                "doc_name",
+                "document_keyword",
+                "docnm_kw",
+            ),
             content=str(item.get("content") or item.get("content_with_weight") or ""),
             page_numbers=tuple(int(page) for page in pages if str(page).isdigit()),
             positions=tuple(positions if isinstance(positions, list) else [positions]),
@@ -297,6 +306,15 @@ class RAGFlowClient:
 
 def _optional_float(value: Any) -> float | None:
     return float(value) if value is not None else None
+
+
+def _first_text(item: dict[str, Any], metadata: dict[str, Any], *keys: str) -> str:
+    for source in (item, metadata):
+        for key in keys:
+            value = source.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    return ""
 
 
 def _guess_content_type(path: Path) -> str:

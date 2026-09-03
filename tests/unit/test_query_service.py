@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -210,6 +211,99 @@ async def test_synthesis_without_valid_citation_fails(tmp_path: Path) -> None:
     saved = history.get_by_request_id("req-6")
     assert saved is not None
     assert saved.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_sparse_rag_citations_are_repaired_with_same_chunks(tmp_path: Path) -> None:
+    llm = FakeLLM(
+        [
+            '{"decision":"need_rag"}',
+            "活病毒培养应在BSL-3实验室进行 [1]。操作人员还需要遵守设施规程。",
+            "活病毒培养应在BSL-3实验室进行 [1]。操作人员还需要遵守设施规程 [1]。",
+        ]
+    )
+    service, _ = _service(tmp_path, llm=llm, ragflow=FakeRAGFlow([_chunk()]))
+
+    events = await _collect(
+        service,
+        QueryRequest(question="需要什么实验室并遵守什么要求？", request_id="req-citation-repair"),
+    )
+
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["answer"].count("[1]") == 2
+    assert len(llm.calls) == 3
+    assert "同一批参考资料" in llm.calls[-1][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_incomplete_citation_coverage_logs_warning_and_returns_answer(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    initial_draft = "实验室需要采取控制措施 [1]。这里还有一个没有引用的具体操作要求。"
+    repaired_draft = "实验室需要采取控制措施 [1]。这个具体操作要求仍然没有引用。"
+    llm = FakeLLM(
+        [
+            '{"decision":"need_rag"}',
+            initial_draft,
+            repaired_draft,
+        ]
+    )
+    service, history = _service(tmp_path, llm=llm, ragflow=FakeRAGFlow([_chunk()]))
+    caplog.set_level(logging.WARNING, logger="biosafe.application.query_service")
+
+    events = await _collect(
+        service,
+        QueryRequest(question="需要采取什么措施？", request_id="req-citation-log"),
+    )
+
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["answer"] == repaired_draft
+    coverage_log = next(
+        record for record in caplog.records if record.message == "RAG citation coverage incomplete"
+    )
+    assert coverage_log.request_id == "req-citation-log"  # type: ignore[attr-defined]
+    assert coverage_log.error_code == (  # type: ignore[attr-defined]
+        "rag_citation_coverage_incomplete"
+    )
+    details = coverage_log.details  # type: ignore[attr-defined]
+    assert details["initial"]["draft"] == initial_draft
+    assert details["repaired"]["draft"] == repaired_draft
+    assert details["initial"]["uncited_segments"] == ["这里还有一个没有引用的具体操作要求。"]
+    assert details["repaired"]["uncited_segments"] == ["这个具体操作要求仍然没有引用。"]
+    assert details["chunks"][0] == {
+        "citation_index": 1,
+        "chunk_id": "chunk-1",
+        "document_id": "doc-1",
+        "document_name": "fixture.txt",
+    }
+    saved = history.get_by_request_id("req-citation-log")
+    assert saved is not None
+    assert saved.status == "completed"
+    assert saved.system_answer == repaired_draft
+    assert saved.latency["synthesis_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_source_insufficiency_and_heading_do_not_trigger_citation_repair(
+    tmp_path: Path,
+) -> None:
+    answer = (
+        "根据提供的参考资料，无法直接给出‘生物安全’的完整定义，因为资料中未包含定义条款。"
+        "\n\n参考资料中仅提供了相关要求：\n"
+        "实验室应设立生物安全委员会并履行监督职责 [1]。"
+        "\n\n由于现有资料缺乏完整定义，因此只能说明相关管理要求。"
+    )
+    llm = FakeLLM(['{"decision":"need_rag"}', answer])
+    service, _ = _service(tmp_path, llm=llm, ragflow=FakeRAGFlow([_chunk()]))
+
+    events = await _collect(
+        service,
+        QueryRequest(question="什么是生物安全？", request_id="req-source-insufficient"),
+    )
+
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["answer"] == answer
+    assert len(llm.calls) == 2
 
 
 @pytest.mark.asyncio
