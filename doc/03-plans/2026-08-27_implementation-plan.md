@@ -77,7 +77,7 @@
 ## Phase 6 - 集成、部署与最终验收（IN_PROGRESS）
 
 - 整理 requirements、前端 lockfile、Docker Compose、健康检查和运行文档。
-- `IN_PROGRESS`：修订生产部署为纯 Python API 容器；前端由生产宿主机 Node 构建并发布到宿主 Nginx，保留 API 端口映射、Compose 健康检查与 SQLite/日志命名卷。
+- `DONE`：生产部署已修订为纯 Python API 容器；前端由生产宿主机 Node 构建并发布到宿主 Nginx，保留 API 端口映射、Compose 健康检查与 SQLite/日志命名卷；恢复 `VITE_API_BASE` 的开发直连/生产同源反代切换。
 - `IN_PROGRESS`：将助手重构为连续对话首屏，并把历史纠错、系统状态和知识库管理收敛到独立 `/admin/` 管理入口。
 - `IN_PROGRESS`：语音回答增加播放波形与逐分片字幕；RAG 合成使用句级引用修复与 coverage warning，硬校验保留至少一个有效引用且编号不越界，引用标号直接关联并展示 RAGFlow 文档名。
 - `IN_PROGRESS`：引用合成失败时记录脱敏的 LLM 首稿、修复稿、未引用片段和 chunk/document 映射，补足运行时诊断证据。
