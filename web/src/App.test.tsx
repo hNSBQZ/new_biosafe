@@ -141,6 +141,39 @@ const knowledgeFile = {
   preview_kind: 'pdf',
 }
 
+const retrievalMatch = {
+  question: '办公区是指什么？',
+  datasets: [
+    {
+      id: 'dataset-default',
+      name: 'biosafe-dev-laws',
+      chunk_method: 'laws',
+    },
+  ],
+  page_size: 8,
+  similarity_threshold: 0.2,
+  vector_similarity_weight: 0.3,
+  chunks: [
+    {
+      citation_index: 1,
+      chunk_id: 'chunk-office',
+      dataset_id: 'dataset-default',
+      dataset_name: '法规标准',
+      document_id: 'doc-office',
+      document_name: '术语标准.pdf',
+      content: '办公区是实验工作区域之外，与实验室区域有效隔离，保存相关资料、档案的区域。',
+      page_numbers: [4],
+      positions: [],
+      image_id: null,
+      similarity: 0.92,
+      vector_similarity: 0.88,
+      term_similarity: 0.95,
+      source_url: null,
+      raw_metadata: {},
+    },
+  ],
+}
+
 beforeEach(() => {
   window.history.replaceState({}, '', '/')
   vi.stubGlobal(
@@ -189,6 +222,10 @@ beforeEach(() => {
 
       if (path === '/api/admin/knowledge/files' && method === 'GET') {
         return jsonResponse({ items: [knowledgeFile], total: 1 })
+      }
+
+      if (path === '/api/admin/knowledge/retrieval-match' && method === 'POST') {
+        return jsonResponse(retrievalMatch)
       }
 
       if (path === '/api/admin/knowledge/files/doc-1/content' && method === 'GET') {
@@ -378,6 +415,33 @@ describe('App', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('同名文件已存在')
     expect(screen.getByRole('alert')).toHaveTextContent('2026')
     expect(screen.getByRole('button', { name: '上传' })).toBeDisabled()
+  })
+
+  it('opens retrieval matching and shows chunks from the online default configuration', async () => {
+    window.history.replaceState({}, '', '/admin/knowledge')
+    window.localStorage.setItem('biosafe-admin-token', 'admin-token')
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '检索匹配' }))
+
+    expect(window.location.pathname).toBe('/admin/knowledge/retrieval')
+    const input = screen.getByRole('textbox', { name: '检索问题' })
+    fireEvent.change(input, { target: { value: '办公区是指什么？' } })
+    fireEvent.click(screen.getByRole('button', { name: '检索' }))
+
+    expect(await screen.findByText('术语标准.pdf')).toBeInTheDocument()
+    expect(screen.getByText(/实验工作区域之外/)).toBeInTheDocument()
+    expect(screen.getByText('biosafe-dev-laws · 法规标准')).toBeInTheDocument()
+    expect(screen.getByText('综合 0.920')).toBeInTheDocument()
+    expect(screen.getByText('向量 0.880')).toBeInTheDocument()
+    expect(screen.getByText('关键词 0.950')).toBeInTheDocument()
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      '/api/admin/knowledge/retrieval-match',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ question: '办公区是指什么？' }),
+      }),
+    )
   })
 
   it('redirects legacy management routes to the admin entry', async () => {

@@ -13,6 +13,7 @@ import {
   Mic,
   MessageSquareText,
   RefreshCw,
+  ScanSearch,
   Send,
   Settings2,
   Square,
@@ -22,9 +23,10 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { KnowledgeAdminPanel } from './KnowledgeAdminPanel'
+import { KnowledgeRetrievalPanel } from './KnowledgeRetrievalPanel'
 import { PcmStreamPlayer, decodeBase64Audio } from './audio/PcmStreamPlayer'
 
-type ViewKey = 'assistant' | 'history' | 'system' | 'knowledge'
+type ViewKey = 'assistant' | 'history' | 'system' | 'knowledge' | 'retrieval'
 type TurnInputMode = 'text' | 'voice'
 type TurnStatus = 'recording' | 'sending' | 'completed' | 'failed' | 'cancelled'
 type AnswerSource = '' | 'instruction' | 'direct' | 'rag' | 'error'
@@ -167,6 +169,7 @@ const VIEW_META: Record<ViewKey, { label: string; title: string; href: string; i
   history: { label: '历史与纠错', title: '历史与人工纠错', href: '/admin/history', icon: History },
   system: { label: '系统状态', title: '系统运行状态', href: '/admin/system', icon: Settings2 },
   knowledge: { label: '知识库管理', title: '知识库管理', href: '/admin/knowledge', icon: BookOpen },
+  retrieval: { label: '检索匹配', title: '检索匹配', href: '/admin/knowledge/retrieval', icon: ScanSearch },
 }
 
 const EXPERIMENT_GENERIC: ExperimentItem = {
@@ -1278,7 +1281,7 @@ export function App() {
           <span>生物安全管理</span>
         </a>
         <nav aria-label="管理导航" className="nav">
-          {(Object.keys(VIEW_META) as ViewKey[]).filter((key) => key !== 'assistant').map((key) => {
+          {(Object.keys(VIEW_META) as ViewKey[]).filter((key) => key !== 'assistant' && key !== 'retrieval').map((key) => {
             const Icon = VIEW_META[key].icon
             return (
               <a
@@ -1752,7 +1755,19 @@ export function App() {
 
             {view === 'knowledge' && (
               <section className="knowledge-page">
-                <KnowledgeAdminPanel onNotice={setGlobalNotice} />
+                <KnowledgeAdminPanel
+                  onNotice={setGlobalNotice}
+                  onOpenRetrieval={() => navigate('retrieval')}
+                />
+              </section>
+            )}
+
+            {view === 'retrieval' && (
+              <section className="knowledge-page">
+                <KnowledgeRetrievalPanel
+                  onNotice={setGlobalNotice}
+                  onBack={() => navigate('knowledge')}
+                />
               </section>
             )}
           </section>
@@ -2435,6 +2450,11 @@ function viewFromPath(pathname: string): ViewKey {
   }
   if (normalized === '/system' || normalized === '/admin/system') {
     return 'system'
+  }
+  if (
+    normalized === '/admin/knowledge/retrieval'
+  ) {
+    return 'retrieval'
   }
   if (
     normalized === '/knowledge' ||

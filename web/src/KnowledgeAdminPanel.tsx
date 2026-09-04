@@ -10,6 +10,7 @@ import {
   LogIn,
   RefreshCw,
   RotateCcw,
+  ScanSearch,
   Search,
   Shield,
   Trash2,
@@ -60,6 +61,7 @@ type PreviewState = {
 
 type Props = {
   onNotice: (notice: string) => void
+  onOpenRetrieval: () => void
 }
 
 class AdminRequestError extends Error {
@@ -89,7 +91,7 @@ const STATUSES: Array<{ value: KnowledgeFileStatus; label: string }> = [
   { value: 'failed', label: '失败' },
 ]
 
-export function KnowledgeAdminPanel({ onNotice }: Props) {
+export function KnowledgeAdminPanel({ onNotice, onOpenRetrieval }: Props) {
   const [token, setToken] = useState(() => loadToken())
   const [loginUsername, setLoginUsername] = useState('admin')
   const [loginPassword, setLoginPassword] = useState('')
@@ -327,6 +329,10 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
           </span>
           {authReady ? (
             <>
+              <button type="button" className="ghost-button" onClick={onOpenRetrieval}>
+                <ScanSearch aria-hidden="true" />
+                检索匹配
+              </button>
               <button
                 type="button"
                 className="primary-button"

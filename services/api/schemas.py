@@ -185,3 +185,22 @@ class KnowledgeRetrievalPreviewResponse(BaseModel):
     question: str
     dataset_ids: list[str]
     chunks: list[KnowledgeChunkItem]
+
+
+class KnowledgeRetrievalMatchRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=20_000)
+
+
+class KnowledgeRetrievalDatasetItem(BaseModel):
+    id: str
+    name: str
+    chunk_method: str
+
+
+class KnowledgeRetrievalMatchResponse(BaseModel):
+    question: str
+    datasets: list[KnowledgeRetrievalDatasetItem]
+    page_size: int
+    similarity_threshold: float
+    vector_similarity_weight: float
+    chunks: list[KnowledgeChunkItem]

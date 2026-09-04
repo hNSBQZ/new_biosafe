@@ -25,6 +25,7 @@ from fastapi import (
     status,
 )
 
+from biosafe.application.query_service import QueryService
 from biosafe.auth import decode_admin_token, issue_admin_token, verify_password
 from biosafe.integrations.ragflow import RAGFlowClient, RAGFlowError
 from biosafe.integrations.ragflow.models import Dataset, Document, RetrievedChunk
@@ -41,6 +42,9 @@ from services.api.schemas import (
     KnowledgeDocumentPage,
     KnowledgeFileItem,
     KnowledgeFilePage,
+    KnowledgeRetrievalDatasetItem,
+    KnowledgeRetrievalMatchRequest,
+    KnowledgeRetrievalMatchResponse,
     KnowledgeRetrievalPreviewRequest,
     KnowledgeRetrievalPreviewResponse,
 )
@@ -512,6 +516,62 @@ async def retrieval_preview(
     return KnowledgeRetrievalPreviewResponse(
         question=payload.question,
         dataset_ids=list(payload.dataset_ids),
+        chunks=[_chunk_item(chunk, index) for index, chunk in enumerate(chunks, start=1)],
+    )
+
+
+@router.post("/knowledge/retrieval-match", response_model=KnowledgeRetrievalMatchResponse)
+async def retrieval_match(
+    payload: KnowledgeRetrievalMatchRequest,
+    request: Request,
+    _: str = Depends(_require_admin),
+) -> KnowledgeRetrievalMatchResponse:
+    client: RAGFlowClient = request.app.state.ragflow_client
+    query_service: QueryService = request.app.state.query_service
+    retrieval_request = query_service.default_retrieval_request(payload.question)
+    dataset_ids = [str(item) for item in retrieval_request["dataset_ids"]]
+    if not dataset_ids:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "ragflow_dataset_not_configured",
+                "message": "No default RAGFlow dataset is configured",
+            },
+        )
+    try:
+        available_datasets, chunks = await asyncio.gather(
+            client.list_datasets(include_parsing_status=True, page_size=100),
+            client.retrieve(
+                payload.question,
+                dataset_ids,
+                page_size=int(retrieval_request["page_size"]),
+                similarity_threshold=float(retrieval_request["similarity_threshold"]),
+                vector_similarity_weight=float(
+                    retrieval_request["vector_similarity_weight"]
+                ),
+            ),
+        )
+    except RAGFlowError as exc:
+        _raise_ragflow_error(exc)
+    datasets_by_id = {dataset.id: dataset for dataset in available_datasets}
+    datasets = [
+        KnowledgeRetrievalDatasetItem(
+            id=dataset_id,
+            name=(datasets_by_id[dataset_id].name if dataset_id in datasets_by_id else dataset_id),
+            chunk_method=(
+                datasets_by_id[dataset_id].chunk_method
+                if dataset_id in datasets_by_id
+                else "unknown"
+            ),
+        )
+        for dataset_id in dataset_ids
+    ]
+    return KnowledgeRetrievalMatchResponse(
+        question=payload.question,
+        datasets=datasets,
+        page_size=int(retrieval_request["page_size"]),
+        similarity_threshold=float(retrieval_request["similarity_threshold"]),
+        vector_similarity_weight=float(retrieval_request["vector_similarity_weight"]),
         chunks=[_chunk_item(chunk, index) for index, chunk in enumerate(chunks, start=1)],
     )
 

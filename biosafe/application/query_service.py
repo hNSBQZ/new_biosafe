@@ -207,13 +207,7 @@ class QueryService:
 
             answer_source = AnswerSource.RAG.value
             dataset_ids = self._dataset_ids_for_experiment(request.experiment_id)
-            ragflow_request = {
-                "question": request.question,
-                "dataset_ids": dataset_ids,
-                "page_size": self._retrieval_page_size,
-                "similarity_threshold": self._similarity_threshold,
-                "vector_similarity_weight": self._vector_similarity_weight,
-            }
+            ragflow_request = self._retrieval_request(request.question, dataset_ids)
             if not dataset_ids:
                 raise QueryFailure(
                     "ragflow_dataset_not_configured",
@@ -548,6 +542,18 @@ class QueryService:
         if bindings:
             return [str(row["dataset_id"]) for row in bindings if row.get("dataset_id")]
         return list(self._default_dataset_ids)
+
+    def default_retrieval_request(self, question: str) -> dict[str, Any]:
+        return self._retrieval_request(question, list(self._default_dataset_ids))
+
+    def _retrieval_request(self, question: str, dataset_ids: list[str]) -> dict[str, Any]:
+        return {
+            "question": question,
+            "dataset_ids": dataset_ids,
+            "page_size": self._retrieval_page_size,
+            "similarity_threshold": self._similarity_threshold,
+            "vector_similarity_weight": self._vector_similarity_weight,
+        }
 
     def _write_history(
         self,

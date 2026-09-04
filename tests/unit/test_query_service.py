@@ -108,6 +108,23 @@ def _service(
     return service, history_repository
 
 
+def test_default_retrieval_request_exposes_online_defaults(tmp_path: Path) -> None:
+    service, _ = _service(
+        tmp_path,
+        llm=FakeLLM([]),
+        ragflow=FakeRAGFlow([]),
+        default_dataset_ids=("dataset-default",),
+    )
+
+    assert service.default_retrieval_request("原始问题") == {
+        "question": "原始问题",
+        "dataset_ids": ["dataset-default"],
+        "page_size": 8,
+        "similarity_threshold": 0.2,
+        "vector_similarity_weight": 0.3,
+    }
+
+
 async def _collect(service: QueryService, request: QueryRequest, **kwargs: Any) -> list[dict]:
     return [event.to_dict() async for event in service.answer_text(request, **kwargs)]
 

@@ -253,6 +253,58 @@ async def test_file_center_name_filter_uses_ragflow_keywords(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_retrieval_match_uses_online_default_configuration(tmp_path: Path) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/api/v1/datasets":
+            return httpx.Response(200, json={"code": 0, "data": [_dataset_payload()]})
+        if request.method == "POST" and request.url.path == "/api/v1/retrieval":
+            body = json.loads(request.content)
+            assert body == {
+                "question": "办公区是指什么？",
+                "dataset_ids": ["dataset-1"],
+                "page": 1,
+                "page_size": 8,
+                "similarity_threshold": 0.2,
+                "vector_similarity_weight": 0.3,
+            }
+            chunk = {
+                "id": "chunk-office",
+                "dataset_id": "dataset-1",
+                "document_id": "doc-office",
+                "document_name": "术语标准.pdf",
+                "content": "办公区是实验工作区域之外，与实验室区域有效隔离的区域。",
+                "similarity": 0.92,
+                "vector_similarity": 0.88,
+                "term_similarity": 0.95,
+            }
+            return httpx.Response(200, json={"code": 0, "data": {"chunks": [chunk]}})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = _app(tmp_path, handler, default_dataset_ids=("dataset-1",))
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        login = await client.post(
+            "/api/admin/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        response = await client.post(
+            "/api/admin/knowledge/retrieval-match",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+            json={"question": "办公区是指什么？"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["datasets"] == [
+        {"id": "dataset-1", "name": "biosafe-dev-laws", "chunk_method": "laws"}
+    ]
+    assert payload["page_size"] == 8
+    assert payload["similarity_threshold"] == 0.2
+    assert payload["vector_similarity_weight"] == 0.3
+    assert payload["chunks"][0]["content"].startswith("办公区是实验工作区域之外")
+
+
+@pytest.mark.asyncio
 async def test_file_upload_creates_internal_category_dataset_and_starts_parse(
     tmp_path: Path,
 ) -> None:
@@ -343,10 +395,19 @@ async def test_file_upload_rejects_same_name_across_categories(tmp_path: Path) -
     assert writes == []
 
 
-def _app(tmp_path: Path, handler) -> object:
+def _app(
+    tmp_path: Path,
+    handler,
+    *,
+    default_dataset_ids: tuple[str, ...] = (),
+) -> object:
     settings = Settings(
         database_path=tmp_path / "api.db",
-        ragflow=RAGFlowConfig(base_url="http://ragflow.test", api_key="rag-token"),
+        ragflow=RAGFlowConfig(
+            base_url="http://ragflow.test",
+            api_key="rag-token",
+            dataset_ids=default_dataset_ids,
+        ),
         admin=AdminConfig(
             username="admin",
             password="secret",

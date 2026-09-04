@@ -883,6 +883,202 @@ svg {
   margin: 0 auto;
 }
 
+.retrieval-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.retrieval-query-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+  padding: 16px;
+  border: 1px solid #d8e1dc;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.retrieval-query-band textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.retrieval-query-band > .primary-button {
+  min-width: 104px;
+}
+
+.retrieval-auth-state {
+  width: min(520px, 100%);
+  justify-items: start;
+}
+
+.retrieval-auth-state > svg {
+  width: 24px;
+  height: 24px;
+  color: #39785e;
+}
+
+.retrieval-auth-state h3 {
+  margin: 0;
+}
+
+.retrieval-config {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #d8e1dc;
+  border-radius: 8px;
+  background: #d8e1dc;
+}
+
+.retrieval-config > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 13px 15px;
+  background: #ffffff;
+}
+
+.retrieval-config > div > span {
+  color: #68756f;
+  font-size: 12px;
+}
+
+.retrieval-config > div > strong {
+  color: #17231e;
+  font-size: 17px;
+}
+
+.retrieval-config .retrieval-dataset-list {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.retrieval-dataset-list > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #315c4b;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.retrieval-dataset-list svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.retrieval-results {
+  display: grid;
+  gap: 12px;
+}
+
+.retrieval-results h3 {
+  margin: 2px 0 0;
+  font-size: 17px;
+}
+
+.retrieval-chunk-list {
+  display: grid;
+  gap: 10px;
+}
+
+.retrieval-chunk {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  border: 1px solid #d8e1dc;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.retrieval-rank {
+  display: grid;
+  place-items: start center;
+  padding-top: 15px;
+  color: #24694e;
+  background: #f0f6f3;
+  border-right: 1px solid #dce7e1;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.retrieval-chunk-body {
+  min-width: 0;
+  display: grid;
+  gap: 11px;
+  padding: 14px 16px;
+}
+
+.retrieval-chunk-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.retrieval-chunk-head > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.retrieval-chunk-head strong,
+.retrieval-chunk-head span,
+.retrieval-chunk-foot span {
+  overflow-wrap: anywhere;
+}
+
+.retrieval-chunk-head strong {
+  color: #17231e;
+  font-size: 14px;
+}
+
+.retrieval-chunk-head > div:first-child span,
+.retrieval-chunk-foot {
+  color: #6a7771;
+  font-size: 12px;
+}
+
+.retrieval-scores {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.retrieval-scores span {
+  padding: 4px 7px;
+  color: #3e5b50;
+  border: 1px solid #d7e2dc;
+  border-radius: 5px;
+  background: #f6f9f7;
+  font-size: 11px;
+}
+
+.retrieval-chunk-body > p {
+  margin: 0;
+  color: #334139;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.retrieval-chunk-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .admin-header {
   display: flex;
   align-items: flex-start;
@@ -1644,6 +1840,10 @@ svg {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .retrieval-config {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .knowledge-preview-drawer {
     width: 100vw;
   }
@@ -1693,6 +1893,29 @@ svg {
 
   .knowledge-filter-band {
     grid-template-columns: 1fr;
+  }
+
+  .retrieval-query-band,
+  .retrieval-config {
+    grid-template-columns: 1fr;
+  }
+
+  .retrieval-query-band > .primary-button {
+    width: 100%;
+  }
+
+  .retrieval-config .retrieval-dataset-list {
+    grid-column: 1;
+  }
+
+  .retrieval-chunk-head,
+  .retrieval-chunk-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .retrieval-scores {
+    justify-content: flex-start;
   }
 
   .knowledge-filter-actions .primary-button {
