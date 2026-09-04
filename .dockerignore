@@ -13,9 +13,8 @@ __pycache__/
 htmlcov/
 .venv/
 node_modules/
-web/node_modules/
+web/
 dist/
-web/dist/
 *.tsbuildinfo
 data/
 logs/

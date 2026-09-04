@@ -2,7 +2,7 @@
 
 ## 部署结果
 
-Compose 只运行 `biosafe` 一个容器，把容器 `8000` 映射到宿主机指定端口。镜像构建时生成 React 静态文件，运行时由 FastAPI 同时提供页面、HTTP/SSE API 和语音 WebSocket；宿主机 Nginx 只需转发这一个端口。SQLite 位于 `biosafe-data` 命名卷，执行 `docker compose down`、重建镜像或替换容器都不会删除该卷。
+Compose 只运行 `biosafe` 后端容器，把容器 `8000` 映射到宿主机指定端口。该镜像只包含 Python API，不包含 Node、前端源码或静态产物。生产宿主机使用已有 Node 构建 `web/dist`，再由宿主机 Nginx 直接提供页面并将 `/api/` 和 `/health` 转发到后端。SQLite 位于 `biosafe-data` 命名卷，执行 `docker compose down`、重建镜像或替换容器都不会删除该卷。
 
 > 不要执行 `docker compose down -v`，除非已备份且确定要删除数据。
 
@@ -26,7 +26,17 @@ docker compose --env-file "$BIOSAFE_ENV_FILE" up -d --build
 
 如果生产机已在仓库根目录维护 `.env`，可直接保持默认，不设 `BIOSAFE_ENV_FILE`。`.env` 已被 Git 和 Docker build context 忽略。
 
-如果生产机不能访问 Docker Hub，将 `PYTHON_BASE_IMAGE` 和 `NODE_BASE_IMAGE` 改为生产私有仓库或本机已有镜像名。运行阶段默认 `python:3.12-slim` 与旧 `biosafe-rag` 生产 Dockerfile 一致；Node 只用于构建，不会进入最终镜像。`PIP_INDEX_URL` 和 `NPM_REGISTRY` 也可换成生产可访问的依赖镜像，但不要把带凭据的 URL 写入 Git。
+如果生产机不能访问 Docker Hub，将 `PYTHON_BASE_IMAGE` 改为生产私有仓库或本机已有镜像名。默认 `python:3.12-slim` 与旧 `biosafe-rag` 生产 Dockerfile 一致。`PIP_INDEX_URL` 可换成生产可访问的依赖镜像，但不要把带凭据的 URL 写入 Git。前端依赖源属于宿主机 Node/npm 配置，不参与 Docker 构建。
+
+### 前端 API 地址
+
+前端恢复旧项目使用的 `VITE_API_BASE` 配置，并统一作用于 HTTP、健康检查和语音 WebSocket：
+
+- `web/.env.production`：值为空，production build 使用当前域名，由 Nginx 转发 `/api/` 和 `/health`。
+- `web/.env.development`：默认 `http://127.0.0.1:8000`，开发浏览器直接访问指定后端。
+- `web/.env.development.local`：可在本机覆盖开发地址，例如 `VITE_API_BASE=http://10.158.0.31:8000`；该文件被 Git 忽略。
+
+开发环境跨域直连时，后端 `BIOSAFE_CORS_ORIGINS` 必须包含实际前端 Origin（协议、IP 和端口均需匹配）。生产前后端同源，不需要额外跨域配置；重新修改 `VITE_API_BASE` 后必须重新执行前端 build。
 
 ### 旧项目变量迁移
 
@@ -48,15 +58,22 @@ docker compose --env-file "$BIOSAFE_ENV_FILE" up -d --build
 ```bash
 git clone <repository-url> new_biosafe
 cd new_biosafe
+
+# 在宿主机生成并发布前端静态文件
+npm --prefix web ci
+npm --prefix web run build
+sudo install -d -m 755 /var/www/biosafe
+sudo rsync -a --delete web/dist/ /var/www/biosafe/
+
+# 构建并启动纯后端容器
 export BIOSAFE_ENV_FILE=/etc/biosafe/biosafe.env
 docker compose --env-file "$BIOSAFE_ENV_FILE" build --pull
 docker compose --env-file "$BIOSAFE_ENV_FILE" up -d
 docker compose --env-file "$BIOSAFE_ENV_FILE" ps
 curl --fail http://127.0.0.1:8192/health
-curl --fail --head http://127.0.0.1:8192/admin/history
 ```
 
-如果修改了 `BIOSAFE_HTTP_PORT`，同步替换上述端口。API 启动时会在持久卷中建立/迁移 `/app/data/biosafe.db`，并在管理员配置完整时幂等更新密码哈希。
+如果修改了 `BIOSAFE_HTTP_PORT`，同步替换上述端口。API 启动时会在持久卷中建立/迁移 `/app/data/biosafe.db`，并在管理员配置完整时幂等更新密码哈希。Nginx 配置生效后，再通过正式域名检查 `/` 和 `/admin/history`。
 
 查看状态和日志：
 
@@ -66,12 +83,35 @@ docker compose --env-file "$BIOSAFE_ENV_FILE" logs --tail=200 biosafe
 docker volume inspect biosafe-data
 ```
 
-## HTTPS 与语音
+## Nginx、HTTPS 与语音
 
-Compose 默认把容器的 `8000` 映射到宿主 `127.0.0.1:8192`，应由宿主机的 HTTPS Nginx 转发。非 localhost 网页必须使用 HTTPS，否则浏览器通常拒绝麦克风权限。宿主 Nginx 可使用以下核心配置：
+Compose 默认把容器的 `8000` 映射到宿主 `127.0.0.1:8192`。Nginx 从 `/var/www/biosafe` 提供前端，只将后端路径反向代理到该端口。默认 production build 的 fetch 和 WebSocket 均使用同源路径。非 localhost 网页必须使用 HTTPS，否则浏览器通常拒绝麦克风权限。
+
+以下内容放在对应的 Nginx `server` 块中：
 
 ```nginx
+root /var/www/biosafe;
+index index.html;
+
+location /assets/ {
+    try_files $uri =404;
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+}
+
 location / {
+    try_files $uri $uri/ /index.html;
+}
+
+location = /health {
+    proxy_pass http://127.0.0.1:8192;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+}
+
+location /api/ {
     proxy_pass http://127.0.0.1:8192;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -84,6 +124,8 @@ location / {
     client_max_body_size 500m;
 }
 ```
+
+`try_files` 只用于前端页面。不要让 `/api/` 或 `/health` 回退到 `index.html`，否则 API 404 会被误包装成 HTML。`proxy_buffering off` 用于保证流式回答及时到达浏览器，Upgrade 头用于 `/api/v1/chat/audio` WebSocket。
 
 如暂时需要局域网 HTTP 直连，将 `BIOSAFE_BIND_ADDRESS` 设为 `0.0.0.0`；该方式不适合启用浏览器录音的正式环境。
 
@@ -129,6 +171,13 @@ curl --fail http://127.0.0.1:8192/health
 
 ```bash
 git pull --ff-only
+
+# 更新前端静态文件
+npm --prefix web ci
+npm --prefix web run build
+sudo rsync -a --delete web/dist/ /var/www/biosafe/
+
+# 更新后端
 docker compose --env-file "$BIOSAFE_ENV_FILE" build --pull
 docker compose --env-file "$BIOSAFE_ENV_FILE" up -d
 docker compose --env-file "$BIOSAFE_ENV_FILE" ps

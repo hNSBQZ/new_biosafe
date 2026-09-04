@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 from biosafe import __version__
 from biosafe.application.correction_dispatcher import AnswerCorrectionDispatcher
@@ -33,8 +29,6 @@ from biosafe.storage import (
 )
 from services.api.routes import admin, audio, chat, experiments, history
 from services.audio import AudioPipeline
-
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -109,36 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(audio.router)
     app.include_router(experiments.router)
     app.include_router(history.router)
-    _mount_web(app, resolved.web_dist_path)
     return app
-
-
-def _mount_web(app: FastAPI, web_dist_path: Path) -> None:
-    index_path = web_dist_path / "index.html"
-    if not index_path.is_file():
-        logger.info("web distribution does not exist: %s", web_dist_path)
-        return
-
-    assets_path = web_dist_path / "assets"
-    if assets_path.is_dir():
-        app.mount("/assets", StaticFiles(directory=assets_path), name="web-assets")
-
-    async def spa_index() -> FileResponse:
-        return FileResponse(index_path, headers={"Cache-Control": "no-cache"})
-
-    app.add_api_route("/", spa_index, methods=["GET", "HEAD"], include_in_schema=False)
-
-    async def spa_fallback(full_path: str) -> FileResponse:
-        if full_path == "api" or full_path.startswith("api/") or full_path == "health":
-            raise HTTPException(status_code=404, detail={"code": "not_found"})
-        return await spa_index()
-
-    app.add_api_route(
-        "/{full_path:path}",
-        spa_fallback,
-        methods=["GET", "HEAD"],
-        include_in_schema=False,
-    )
 
 
 app = create_app()

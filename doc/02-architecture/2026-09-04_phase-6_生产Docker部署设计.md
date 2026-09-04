@@ -2,8 +2,9 @@
 
 ## 目标
 
-- 从 Git 检出的仓库可构建一个同时包含 FastAPI 和 React 构建产物的生产镜像。
-- Compose 只运行一个容器，向宿主机映射一个可配置端口。
+- 从 Git 检出的仓库可构建只包含 FastAPI 的生产镜像。
+- 前端在生产宿主机使用 Node 构建，静态产物由宿主机 Nginx 提供。
+- Compose 只运行 API 容器，向宿主机映射一个可配置端口。
 - SQLite 数据库保存到独立 Docker 命名卷，容器重建和版本升级不丢数据。
 - 提供首次启动、配置、健康检查、备份、恢复、升级和回滚步骤。
 
@@ -18,23 +19,25 @@
 
 ```text
 宿主机 Nginx / HTTPS
-           |
-           v
-  biosafe: Uvicorn, workers=1
-    |-- FastAPI HTTP/SSE/WebSocket
-    |-- React static + SPA fallback
-    |-- biosafe-data:/app/data
-    `-- 外部 RAGFlow/LLM/ASR/TTS
+    |-- /、/assets、/admin/* -> web/dist 静态文件 + SPA fallback
+    `-- /api/*、/health -> 127.0.0.1:8192
+                              |
+                              v
+                     biosafe: Uvicorn, workers=1
+                       |-- FastAPI HTTP/SSE/WebSocket
+                       |-- biosafe-data:/app/data
+                       `-- 外部 RAGFlow/LLM/ASR/TTS
 ```
 
-- `Dockerfile` 的 Node 阶段构建 React，Python 3.12 运行阶段只复制 `dist`，不包含 Node 运行时。
-- FastAPI 在所有 API 路由之后挂载静态资源和 SPA fallback。未知 `/api/*` 仍返回 JSON 404，不会被 `index.html` 掩盖。
+- `Dockerfile` 只构建 Python 3.12 API 镜像，不复制 `web/`，也不依赖 Node 镜像。
+- 生产机在 `web/` 执行锁文件安装和 Vite production build，再将 `web/dist` 同步到 Nginx 静态目录。
+- 前端统一通过 `VITE_API_BASE` 生成 HTTP 和 WebSocket 地址。生产配置留空以使用同源 `/api` 和 Nginx 反代；开发配置可指定后端 IP 和端口。Nginx 只对页面路由执行 SPA fallback，`/api/*` 不回退到 `index.html`。
 - 运行阶段使用非 root 用户，启动时由应用执行幂等 SQLite migration 和管理员 upsert。
 - Uvicorn 只运行一个 worker。当前纠错队列是进程内队列，多 worker/多容器会改变任务恢复和消费语义。
 
 ## 配置与数据
 
-- Compose 从可配置的 `BIOSAFE_ENV_FILE` 注入生产环境，并强制 `BIOSAFE_ENV=production`、`BIOSAFE_DATABASE_PATH=/app/data/biosafe.db`、`BIOSAFE_WEB_DIST_PATH=/app/web/dist` 和容器内日志路径。
+- Compose 从可配置的 `BIOSAFE_ENV_FILE` 注入生产环境，并强制 `BIOSAFE_ENV=production`、`BIOSAFE_DATABASE_PATH=/app/data/biosafe.db` 和容器内日志路径。
 - `biosafe-data` 命名卷挂载到 `/app/data`，SQLite 主文件、WAL 和 SHM 位于同一持久化文件系统。
 - `biosafe-logs` 命名卷挂载到 `/app/logs`；同时保留 stderr JSON 日志供 Docker 驱动轮转。
 - RAGFlow/LLM/ASR/TTS 如果运行在 Docker 宿主机，使用 `host.docker.internal`；Compose 为 Linux 添加 `host-gateway` 映射。
@@ -54,9 +57,9 @@
 
 ## 验证
 
-- `docker compose config --quiet`
-- `docker compose build`
-- `docker compose up -d` 后检查容器 health、SPA 子路由、HTTP/SSE 和 WebSocket。
+- `docker compose config --quiet`，不在开发机创建生产容器或镜像。
+- `npm --prefix web run build` 验证宿主机静态产物构建。
+- 生产机执行 `docker compose build/up` 后检查容器 health、HTTP/SSE 和 WebSocket；通过 Nginx 检查 SPA 子路由。
 - 在隔离的测试卷写入历史，重建容器后确认记录仍存在。
 - `conda run -n biosafe python -m pytest -q`
 - `npm --prefix web test -- --run && npm --prefix web run lint && npm --prefix web run build`

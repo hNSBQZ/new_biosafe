@@ -17,6 +17,7 @@ import {
   Upload,
   X,
 } from 'lucide-react'
+import { apiUrl } from './apiBase'
 
 type KnowledgeCategory = 'laws' | 'manual' | 'table' | 'paper' | 'naive'
 type KnowledgeFileStatus = 'uploaded' | 'parsing' | 'completed' | 'failed'
@@ -179,7 +180,7 @@ export function KnowledgeAdminPanel({ onNotice, onOpenRetrieval }: Props) {
     setLoginLoading(true)
     setLoginError('')
     try {
-      const response = await fetch('/api/admin/login', {
+      const response = await fetch(apiUrl('/api/admin/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: loginUsername, password: loginPassword }),
@@ -699,7 +700,7 @@ async function adminFetch(token: string, path: string, init: RequestInit = {}) {
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(apiUrl(path), { ...init, headers })
   if (!response.ok) throw await responseError(response)
   return response
 }

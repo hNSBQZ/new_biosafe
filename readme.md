@@ -13,4 +13,4 @@
 
 ## 生产部署
 
-仓库提供同时托管 React 页面和 API 的单容器镜像，以及带 SQLite 持久卷的 `docker-compose.yml`。生产配置差异、宿主 Nginx、首次启动、备份恢复及升级步骤见 `doc/06-operations/2026-09-04_production-docker-deployment.md`。
+仓库提供纯 FastAPI 后端镜像和带 SQLite 持久卷的 `docker-compose.yml`。React 前端由生产宿主机 Node 构建并作为静态文件发布到宿主 Nginx；生产配置差异、首次启动、Nginx、备份恢复及升级步骤见 `doc/06-operations/2026-09-04_production-docker-deployment.md`。

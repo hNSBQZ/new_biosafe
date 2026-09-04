@@ -119,7 +119,6 @@ class Settings:
     environment: str = "development"
     database_path: Path = Path("data/biosafe.db")
     experiments_dir: Path = Path("experiments")
-    web_dist_path: Path = Path("web/dist")
     log_level: str = "INFO"
     log_file: Path = Path("logs/biosafe-api.log")
     cors_origins: tuple[str, ...] = ("http://localhost:5173",)
@@ -137,7 +136,6 @@ class Settings:
             environment=_value(source, "BIOSAFE_ENV", "development"),
             database_path=Path(_value(source, "BIOSAFE_DATABASE_PATH", "data/biosafe.db")),
             experiments_dir=Path(_value(source, "BIOSAFE_EXPERIMENTS_DIR", "experiments")),
-            web_dist_path=Path(_value(source, "BIOSAFE_WEB_DIST_PATH", "web/dist")),
             log_level=_value(source, "BIOSAFE_LOG_LEVEL", "INFO").upper(),
             log_file=Path(_value(source, "BIOSAFE_LOG_FILE", "logs/biosafe-api.log")),
             cors_origins=_csv(source, "BIOSAFE_CORS_ORIGINS", ("http://localhost:5173",)),

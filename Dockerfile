@@ -1,17 +1,4 @@
 ARG PYTHON_BASE_IMAGE=python:3.12-slim
-ARG NODE_BASE_IMAGE=node:22-alpine
-
-FROM ${NODE_BASE_IMAGE} AS web-builder
-
-ARG NPM_REGISTRY=https://registry.npmjs.org
-
-WORKDIR /build
-
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --registry="${NPM_REGISTRY}"
-
-COPY web/ ./
-RUN npm run build
 
 FROM ${PYTHON_BASE_IMAGE}
 
@@ -24,7 +11,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BIOSAFE_ENV=production \
     BIOSAFE_DATABASE_PATH=/app/data/biosafe.db \
     BIOSAFE_EXPERIMENTS_DIR=/app/experiments \
-    BIOSAFE_WEB_DIST_PATH=/app/web/dist \
     BIOSAFE_LOG_FILE=/app/logs/biosafe-api.log
 
 WORKDIR /app
@@ -37,7 +23,6 @@ COPY biosafe ./biosafe
 COPY services ./services
 COPY scripts ./scripts
 COPY experiments ./experiments
-COPY --from=web-builder /build/dist ./web/dist
 
 RUN python -m pip install --no-cache-dir . \
     && mkdir -p /app/data /app/logs \

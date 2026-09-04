@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ArrowLeft, Database, FileSearch, LoaderCircle, Search } from 'lucide-react'
+import { apiUrl } from './apiBase'
 
 type RetrievalDataset = {
   id: string
@@ -49,7 +50,7 @@ export function KnowledgeRetrievalPanel({ onBack, onNotice }: Props) {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/admin/knowledge/retrieval-match', {
+      const response = await fetch(apiUrl('/api/admin/knowledge/retrieval-match'), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

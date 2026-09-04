@@ -34,7 +34,7 @@ conda run -n biosafe python scripts/run_api.py
 npm --prefix web run dev
 ```
 
-Vite 把 `/api` 和 `/health` 代理到本机 8000 端口，其中 `/api` 显式开启 WebSocket 转发。通过 `http://10.158.0.31:5173` 访问时，浏览器语音地址应为 `ws://10.158.0.31:5173/api/v1/chat/audio`，再由 Vite 转发到 FastAPI。浏览器路由包括 `/`、`/history`、`/system` 和 `/knowledge`。生产部署的反向代理必须同时支持 `/api/v1/chat/audio` 的 WebSocket upgrade，并把非 API 页面路径回退到前端 `index.html`。
+前端通过 `VITE_API_BASE` 选择后端。`web/.env.development` 默认直连 `http://127.0.0.1:8000`；需要指定其他 IP/端口时，在 Git 忽略的 `web/.env.development.local` 中覆盖该变量，并把实际 Vite Origin 加入后端 `BIOSAFE_CORS_ORIGINS`。将变量留空时仍可使用 Vite 对 `/api` 和 `/health` 的代理，其中 `/api` 已开启 WebSocket 转发。浏览器路由包括 `/`、`/history`、`/system` 和 `/knowledge`。生产构建默认使用同源地址，Nginx 必须支持 `/api/v1/chat/audio` 的 WebSocket upgrade，并把非 API 页面路径回退到前端 `index.html`。
 
 ## 管理员初始化
 
@@ -90,7 +90,7 @@ Vite 把 `/api` 和 `/health` 代理到本机 8000 端口，其中 `/api` 显式
 
 ### 语音一直显示正在连接
 
-浏览器开发工具中确认连接地址为当前前端主机的 `/api/v1/chat/audio`。开发环境需使用当前 `vite.config.ts` 的 `ws: true` 配置，并在配置变化后重启 Vite；生产代理需转发 WebSocket upgrade。前端等待 8 秒仍未建立连接时会显示超时，不会永久停在连接状态。注意 `ASR_URI` 是 FastAPI 到 ASR 服务的第二层连接，只有录音提交后才会使用。
+浏览器开发工具中确认连接地址与 `VITE_API_BASE` 一致。开发环境直连后端时由前端自动把 `http/https` 转成 `ws/wss`；变量留空并使用 Vite 代理时需保留 `vite.config.ts` 的 `ws: true`。修改配置后重启 Vite；生产 Nginx 需转发 WebSocket upgrade。前端等待 8 秒仍未建立连接时会显示超时，不会永久停在连接状态。注意 `ASR_URI` 是 FastAPI 到 ASR 服务的第二层连接，只有录音提交后才会使用。
 
 ### TTS 有分片但没有声音
 

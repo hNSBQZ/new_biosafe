@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { apiUrl, apiWebSocketUrl } from './apiBase'
 import type { KeyboardEvent, ReactNode } from 'react'
 import {
   Activity,
@@ -340,7 +341,7 @@ export function App() {
 
   async function loadHealth() {
     try {
-      const response = await fetch('/health')
+      const response = await fetch(apiUrl('/health'))
       if (!response.ok) {
         throw new Error(`health ${response.status}`)
       }
@@ -354,7 +355,7 @@ export function App() {
 
   async function loadExperiments() {
     try {
-      const response = await fetch('/api/experiments')
+      const response = await fetch(apiUrl('/api/experiments'))
       if (!response.ok) {
         throw new Error(`experiments ${response.status}`)
       }
@@ -379,7 +380,7 @@ export function App() {
       if (historyStatusFilter) {
         params.set('status', historyStatusFilter)
       }
-      const response = await fetch(`/api/history?${params.toString()}`)
+      const response = await fetch(apiUrl(`/api/history?${params.toString()}`))
       if (!response.ok) {
         throw new Error(`history ${response.status}`)
       }
@@ -458,7 +459,7 @@ export function App() {
     }
     setQueueingCorrection(true)
     try {
-      const response = await fetch(`/api/history/${selectedHistoryId}/auto-correction`, {
+      const response = await fetch(apiUrl(`/api/history/${selectedHistoryId}/auto-correction`), {
         method: 'POST',
       })
       if (!response.ok) {
@@ -486,7 +487,7 @@ export function App() {
     }
     setSavingCorrection(true)
     try {
-      const response = await fetch(`/api/history/${selectedHistoryId}/correction`, {
+      const response = await fetch(apiUrl(`/api/history/${selectedHistoryId}/correction`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -539,7 +540,7 @@ export function App() {
     const controller = new AbortController()
     chatAbortRef.current = controller
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2560,7 +2561,7 @@ function describeError(error: unknown) {
 }
 
 async function fetchHistoryDetail(historyId: number, signal?: AbortSignal) {
-  const response = await fetch(`/api/history/${historyId}`, { signal })
+  const response = await fetch(apiUrl(`/api/history/${historyId}`), { signal })
   if (!response.ok) {
     throw new Error(`history detail ${response.status}`)
   }
@@ -2625,10 +2626,9 @@ function makeId(prefix: string) {
 }
 
 function buildAudioSocketUrl(experimentId: string) {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/api/v1/chat/audio?experiment_id=${encodeURIComponent(
-    experimentId,
-  )}`
+  return apiWebSocketUrl(
+    `/api/v1/chat/audio?experiment_id=${encodeURIComponent(experimentId)}`,
+  )
 }
 
 function resolveRecordingMimeType() {

@@ -1,5 +1,7 @@
 # Phase 6 工作段 - 生产 Docker 部署
 
+> 本记录描述首次实现及其当时的真实验证结果。该版内置前端的部署拓扑已被同日“生产前后端分离部署修订”取代，保留本文件用于开发留痕。
+
 - 状态：DONE
 - 范围：为 Git 传输到生产机后的单容器部署提供 Dockerfile、Compose、无密钥生产配置模板、宿主 Nginx 说明和 SQLite 持久化/备份恢复流程。
 - 关键设计：Node 多阶段只负责构建 React，最终 Python 3.12 slim 镜像中由单 worker FastAPI 同时提供 SPA、HTTP/SSE API 和 WebSocket；Compose 只映射一个宿主端口，不运行 Nginx 容器；宿主 Nginx 自行负责 HTTPS 和反向代理。

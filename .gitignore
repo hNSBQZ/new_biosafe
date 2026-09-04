@@ -1,6 +1,8 @@
 .env
 .env.*
 !.env.example
+!web/.env.development
+!web/.env.production
 __pycache__/
 *.py[cod]
 *.egg-info/
