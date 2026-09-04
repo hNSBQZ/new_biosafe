@@ -566,10 +566,7 @@ async def _resolve_managed_document(
 ) -> tuple[Dataset, Document]:
     datasets = await _managed_datasets(client)
     groups = await asyncio.gather(
-        *(
-            client.list_documents(dataset.id, document_id=document_id, page_size=1)
-            for dataset in datasets
-        )
+        *(client.list_documents(dataset.id, page_size=100) for dataset in datasets)
     )
     for dataset, documents in zip(datasets, groups, strict=True):
         document = next((item for item in documents if item.id == document_id), None)
