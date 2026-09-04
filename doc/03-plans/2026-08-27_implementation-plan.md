@@ -84,7 +84,7 @@
 - `DONE`（后续已替代）：收紧场景切换 FuncCall 规则，避免“进入生物安全实验室时……”等知识问题误触发 `SwitchExperimentScene`。
 - `DONE`：将 FuncCall 并入第一轮实验上下文 LLM 的三路结构化决定，以严格命令白名单和空参数校验替代在线本地正则识别；真实模型正反例通过。
 - `DONE`：将知识库管理重构为隐藏 RAGFlow dataset/chunk 细节的文件中心，支持按日期、资料类别和处理状态筛选、分类上传、自动解析、原文件整页预览/下载、失败重试和删除；真实 RAGFlow 原文件只读下载探测通过。
-- 校验从旧 `.env` 复用服务配置但不复制 secret；补齐管理员初始化和 token 生命周期。
+- 使用当前仓库本地 `.env` 验证服务配置但不提交或输出 secret；补齐管理员初始化和 token 生命周期。
 - 运行后端全量测试、前端测试/build、RAGFlow live smoke、文本/语音/管理 Playwright E2E。
 - 检查 Git 历史和工作树没有 secret、数据库、日志或大产物。
 - 写最终测试报告、运维文档和 Phase 6 记录并提交。
