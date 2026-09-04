@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -43,7 +42,6 @@ def main() -> None:
     load_dotenv(env_file, override=False)
     settings = Settings.from_env()
     log_file = _resolve_from_project(settings.log_file)
-    os.environ["BIOSAFE_LOG_FILE"] = str(log_file)
     configure_logging(settings.log_level, log_file)
     logging.getLogger(__name__).info(
         "starting biosafe api host=%s port=%s env_file=%s log_file=%s reload=%s",

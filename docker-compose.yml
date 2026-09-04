@@ -2,25 +2,15 @@ name: new-biosafe
 
 services:
   biosafe:
-    image: ${BIOSAFE_IMAGE:-new-biosafe:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.12-slim}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    build: .
+    container_name: new-biosafe
     env_file:
-      - ${BIOSAFE_ENV_FILE:-.env}
-    environment:
-      BIOSAFE_ENV: production
-      BIOSAFE_DATABASE_PATH: /app/data/biosafe.db
-      BIOSAFE_EXPERIMENTS_DIR: /app/experiments
-      BIOSAFE_LOG_FILE: /app/logs/biosafe-api.log
+      - .env
     volumes:
       - biosafe-data:/app/data
       - biosafe-logs:/app/logs
     ports:
-      - "${BIOSAFE_BIND_ADDRESS:-127.0.0.1}:${BIOSAFE_HTTP_PORT:-8192}:8000"
+      - "127.0.0.1:8192:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     init: true
@@ -51,6 +41,6 @@ services:
 
 volumes:
   biosafe-data:
-    name: ${BIOSAFE_DATA_VOLUME:-biosafe-data}
+    name: biosafe-data
   biosafe-logs:
-    name: ${BIOSAFE_LOG_VOLUME:-biosafe-logs}
+    name: biosafe-logs

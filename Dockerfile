@@ -1,17 +1,8 @@
-ARG PYTHON_BASE_IMAGE=python:3.12-slim
-
-FROM ${PYTHON_BASE_IMAGE}
-
-ARG PIP_INDEX_URL=https://pypi.org/simple
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_INDEX_URL=${PIP_INDEX_URL} \
-    BIOSAFE_ENV=production \
-    BIOSAFE_DATABASE_PATH=/app/data/biosafe.db \
-    BIOSAFE_EXPERIMENTS_DIR=/app/experiments \
-    BIOSAFE_LOG_FILE=/app/logs/biosafe-api.log
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
@@ -24,7 +15,10 @@ COPY services ./services
 COPY scripts ./scripts
 COPY experiments ./experiments
 
-RUN python -m pip install --no-cache-dir . \
+RUN python -m pip install --no-cache-dir \
+        --index-url https://mirrors.aliyun.com/pypi/simple/ \
+        --trusted-host mirrors.aliyun.com \
+        . \
     && mkdir -p /app/data /app/logs \
     && chown -R biosafe:biosafe /app
 

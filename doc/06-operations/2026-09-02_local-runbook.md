@@ -53,15 +53,14 @@ npm --prefix web run dev
 
 - `CORRECTION_ENABLED=true`
 - `CORRECTION_BASE_URL`、`CORRECTION_API_KEY`、`CORRECTION_MODEL`
-- `CORRECTION_TIMEOUT_SECONDS`、`CORRECTION_QUEUE_MAXSIZE`、`CORRECTION_WORKER_COUNT`、`CORRECTION_DRAIN_TIMEOUT_SECONDS`
 
-为兼容旧项目，本地环境也可继续使用 `ANSWER_EVALUATION_BASE_URL`、`ANSWER_EVALUATION_API_KEY`、`ANSWER_EVALUATION_MODEL` 与 `EVAL_*` 队列变量；同名 `CORRECTION_*` 优先。服务启动后，成功的 direct/RAG 历史会自动入队。管理端 `/admin/history` 展示模型建议和来源，并允许重新提交；“采用模型建议”只填入人工编辑框，仍需显式保存。
+队列容量 200、worker 数 2、请求超时 120 秒、关闭排空等待 30 秒使用代码默认值，不再从环境变量调整。服务启动后，成功的 direct/RAG 历史会自动入队。管理端 `/admin/history` 展示模型建议和来源，并允许重新提交；“采用模型建议”只填入人工编辑框，仍需显式保存。
 
 `request_error` 表示模型鉴权、网络或超时失败，`parse_error` 表示模型没有返回要求的 JSON，`dropped` 表示队列容量不足。修正失败不影响原问答。应用重启会恢复 `pending/running` 任务，关闭时最多等待配置的 drain timeout。
 
 ## 日志
 
-默认文件为 `logs/biosafe-api.log`，由 `BIOSAFE_LOG_FILE` 调整。日志同时写 stderr，采用 JSON 行格式，单文件上限 10 MiB，保留 5 个滚动备份。
+日志固定写入 `logs/biosafe-api.log`，同时写 stderr，采用 JSON 行格式，单文件上限 10 MiB，保留 5 个滚动备份。
 
 检查顺序：
 
@@ -94,7 +93,7 @@ npm --prefix web run dev
 
 ### TTS 有分片但没有声音
 
-TTS endpoint 返回原始单声道 PCM16，采样率由 `TTS_SAMPLE_RATE` 声明，默认 `24000`。该值必须与 TTS 服务真实输出一致，否则会出现播放速度或音高异常。
+TTS endpoint 必须返回 24000 Hz 原始单声道 PCM16，该采样率由当前代码固定；服务输出不一致会导致播放速度或音高异常。
 
 前端会在用户点击麦克风时创建并解锁 `AudioContext`，收到 `audio_stream.data` 后按 `sequence` 排序和连续调度。排查顺序：
 

@@ -37,7 +37,9 @@
 
 ## 配置与数据
 
-- Compose 从可配置的 `BIOSAFE_ENV_FILE` 注入生产环境，并强制 `BIOSAFE_ENV=production`、`BIOSAFE_DATABASE_PATH=/app/data/biosafe.db` 和容器内日志路径。
+- 生产机沿用旧项目方式，在仓库根目录提供不提交的 `.env`，Compose 通过 `env_file` 直接注入容器。
+- 应用环境变量集合以当前根目录 `.env` 的变量名为准；镜像名、基础镜像、pip 源、端口和卷名固化在 Dockerfile/Compose 中，不混入应用 `.env`。
+- 纠错队列大小/worker/超时、TTS 采样率和日志文件路径使用代码默认值，不再接受旧纠错兼容名或当前 `.env` 之外的部署变量。
 - `biosafe-data` 命名卷挂载到 `/app/data`，SQLite 主文件、WAL 和 SHM 位于同一持久化文件系统。
 - `biosafe-logs` 命名卷挂载到 `/app/logs`；同时保留 stderr JSON 日志供 Docker 驱动轮转。
 - RAGFlow/LLM/ASR/TTS 如果运行在 Docker 宿主机，使用 `host.docker.internal`；Compose 为 Linux 添加 `host-gateway` 映射。
@@ -52,12 +54,12 @@
 
 ## 回滚
 
-- 镜像通过 `BIOSAFE_IMAGE` 可选标签命名；回滚时重新检出上一 Git 提交并重建。
+- 回滚时重新检出上一 Git 提交并重建固定的 Compose 服务镜像。
 - 代码回滚默认不回滚 SQLite schema。当前 migration 仅向前且可重复执行；需要数据回滚时必须在停止 API 后从整卷备份恢复。
 
 ## 验证
 
-- `docker compose config --quiet`，不在开发机创建生产容器或镜像。
+- `docker compose config --quiet`，并核对 Compose 注入变量集合与根 `.env` 一致；不在开发机创建生产容器或镜像。
 - `npm --prefix web run build` 验证宿主机静态产物构建。
 - 生产机执行 `docker compose build/up` 后检查容器 health、HTTP/SSE 和 WebSocket；通过 Nginx 检查 SPA 子路由。
 - 在隔离的测试卷写入历史，重建容器后确认记录仍存在。

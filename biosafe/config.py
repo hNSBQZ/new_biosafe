@@ -29,10 +29,6 @@ def _boolean(env: Mapping[str, str], name: str, default: bool = False) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
-def _alias(env: Mapping[str, str], primary: str, legacy: str, default: str = "") -> str:
-    return _value(env, primary) or _value(env, legacy, default)
-
-
 def _csv(env: Mapping[str, str], name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     raw = _value(env, name)
     return tuple(part.strip() for part in raw.split(",") if part.strip()) if raw else default
@@ -137,7 +133,6 @@ class Settings:
             database_path=Path(_value(source, "BIOSAFE_DATABASE_PATH", "data/biosafe.db")),
             experiments_dir=Path(_value(source, "BIOSAFE_EXPERIMENTS_DIR", "experiments")),
             log_level=_value(source, "BIOSAFE_LOG_LEVEL", "INFO").upper(),
-            log_file=Path(_value(source, "BIOSAFE_LOG_FILE", "logs/biosafe-api.log")),
             cors_origins=_csv(source, "BIOSAFE_CORS_ORIGINS", ("http://localhost:5173",)),
             ragflow=RAGFlowConfig(
                 base_url=_value(source, "RAGFLOW_BASE_URL").rstrip("/"),
@@ -161,7 +156,6 @@ class Settings:
                 model=_value(source, "TTS_MODEL"),
                 voice=_value(source, "TTS_VOICE"),
                 response_format=_value(source, "TTS_RESPONSE_FORMAT", "pcm"),
-                sample_rate=_integer(source, "TTS_SAMPLE_RATE", 24_000),
                 timeout=_float(source, "TTS_TIMEOUT", 60.0),
                 max_concurrent=_integer(source, "TTS_MAX_CONCURRENT", 2),
                 max_retries=_integer(source, "TTS_MAX_RETRIES", 1),
@@ -174,49 +168,9 @@ class Settings:
                 token_ttl_seconds=_integer(source, "BIOSAFE_ADMIN_TOKEN_TTL_SECONDS", 28_800),
             ),
             correction=CorrectionConfig(
-                enabled=_boolean(
-                    source,
-                    "CORRECTION_ENABLED",
-                    _boolean(source, "EVAL_ENABLED", False),
-                ),
-                base_url=_alias(
-                    source, "CORRECTION_BASE_URL", "ANSWER_EVALUATION_BASE_URL"
-                ).rstrip("/"),
-                api_key=_alias(
-                    source, "CORRECTION_API_KEY", "ANSWER_EVALUATION_API_KEY"
-                ),
-                model=_alias(source, "CORRECTION_MODEL", "ANSWER_EVALUATION_MODEL"),
-                timeout_seconds=max(
-                    1.0,
-                    _float(
-                        source,
-                        "CORRECTION_TIMEOUT_SECONDS",
-                        _float(source, "EVAL_REQUEST_TIMEOUT", 120.0),
-                    ),
-                ),
-                queue_maxsize=max(
-                    1,
-                    _integer(
-                        source,
-                        "CORRECTION_QUEUE_MAXSIZE",
-                        _integer(source, "EVAL_QUEUE_MAXSIZE", 200),
-                    ),
-                ),
-                worker_count=max(
-                    1,
-                    _integer(
-                        source,
-                        "CORRECTION_WORKER_COUNT",
-                        _integer(source, "EVAL_WORKER_COUNT", 2),
-                    ),
-                ),
-                drain_timeout_seconds=max(
-                    0.0,
-                    _float(
-                        source,
-                        "CORRECTION_DRAIN_TIMEOUT_SECONDS",
-                        _float(source, "EVAL_DRAIN_TIMEOUT", 30.0),
-                    ),
-                ),
+                enabled=_boolean(source, "CORRECTION_ENABLED", False),
+                base_url=_value(source, "CORRECTION_BASE_URL").rstrip("/"),
+                api_key=_value(source, "CORRECTION_API_KEY"),
+                model=_value(source, "CORRECTION_MODEL"),
             ),
         )
