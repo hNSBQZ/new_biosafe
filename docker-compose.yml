@@ -1,0 +1,59 @@
+name: new-biosafe
+
+services:
+  biosafe:
+    image: ${BIOSAFE_IMAGE:-new-biosafe:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.12-slim}
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:22-alpine}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    env_file:
+      - ${BIOSAFE_ENV_FILE:-.env}
+    environment:
+      BIOSAFE_ENV: production
+      BIOSAFE_DATABASE_PATH: /app/data/biosafe.db
+      BIOSAFE_EXPERIMENTS_DIR: /app/experiments
+      BIOSAFE_WEB_DIST_PATH: /app/web/dist
+      BIOSAFE_LOG_FILE: /app/logs/biosafe-api.log
+    volumes:
+      - biosafe-data:/app/data
+      - biosafe-logs:/app/logs
+    ports:
+      - "${BIOSAFE_BIND_ADDRESS:-127.0.0.1}:${BIOSAFE_HTTP_PORT:-8192}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 4
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  biosafe-data:
+    name: ${BIOSAFE_DATA_VOLUME:-biosafe-data}
+  biosafe-logs:
+    name: ${BIOSAFE_LOG_VOLUME:-biosafe-logs}

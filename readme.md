@@ -11,3 +11,6 @@
 
 旧项目 `/cache/hanqingzhe/biosafe-rag` 只作为可复用代码和服务配置的来源，不在本次重构中直接修改。
 
+## 生产部署
+
+仓库提供同时托管 React 页面和 API 的单容器镜像，以及带 SQLite 持久卷的 `docker-compose.yml`。生产配置差异、宿主 Nginx、首次启动、备份恢复及升级步骤见 `doc/06-operations/2026-09-04_production-docker-deployment.md`。
