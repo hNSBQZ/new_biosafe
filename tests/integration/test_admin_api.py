@@ -220,6 +220,39 @@ async def test_admin_file_center_hides_datasets_and_proxies_original_file(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_file_center_name_filter_uses_ragflow_keywords(tmp_path: Path) -> None:
+    filename = "1746698296999_79788.pdf"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/api/v1/datasets":
+            return httpx.Response(200, json={"code": 0, "data": [_dataset_payload()]})
+        if request.method == "GET" and request.url.path.endswith("/documents"):
+            assert request.url.params["keywords"] == filename
+            assert "name" not in request.url.params
+            document = _document_payload()
+            document["name"] = filename
+            return httpx.Response(200, json={"code": 0, "data": [document]})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = _app(tmp_path, handler)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        login = await client.post(
+            "/api/admin/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        response = await client.get(
+            "/api/admin/knowledge/files",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+            params={"name": filename},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["name"] == filename
+
+
+@pytest.mark.asyncio
 async def test_file_upload_creates_internal_category_dataset_and_starts_parse(
     tmp_path: Path,
 ) -> None:

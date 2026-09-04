@@ -133,10 +133,10 @@ class RAGFlowClient:
         params: dict[str, Any] = {"page": page, "page_size": page_size}
         if keywords is not None:
             params["keywords"] = keywords
+        elif name is not None:
+            params["keywords"] = name
         if document_id is not None:
             params["id"] = document_id
-        if name is not None:
-            params["name"] = name
         if run is not None:
             params["run"] = run
         if suffix is not None:

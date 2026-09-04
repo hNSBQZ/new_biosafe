@@ -29,6 +29,55 @@ async def test_list_datasets_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_documents_maps_name_filter_to_keywords() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/datasets/dataset-1/documents"
+        assert request.url.params["keywords"] == "1746698296999_79788.pdf"
+        assert "name" not in request.url.params
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "data": [
+                    {
+                        "id": "document-1",
+                        "knowledgebase_id": "dataset-1",
+                        "name": "1746698296999_79788.pdf",
+                        "run": "DONE",
+                    }
+                ],
+            },
+        )
+
+    config = RAGFlowConfig(base_url="http://ragflow.test", api_key="test-token")
+    async with RAGFlowClient(config, httpx.MockTransport(handler)) as client:
+        documents = await client.list_documents(
+            "dataset-1",
+            name="1746698296999_79788.pdf",
+        )
+
+    assert documents[0].name == "1746698296999_79788.pdf"
+
+
+@pytest.mark.asyncio
+async def test_list_documents_prefers_explicit_keywords_filter() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["keywords"] == "explicit search"
+        assert "name" not in request.url.params
+        return httpx.Response(200, json={"code": 0, "data": []})
+
+    config = RAGFlowConfig(base_url="http://ragflow.test", api_key="test-token")
+    async with RAGFlowClient(config, httpx.MockTransport(handler)) as client:
+        documents = await client.list_documents(
+            "dataset-1",
+            keywords="explicit search",
+            name="ignored name",
+        )
+
+    assert documents == []
+
+
+@pytest.mark.asyncio
 async def test_retrieval_uses_original_question_and_normalizes_chunk() -> None:
     payload = json.loads((FIXTURES / "ragflow_retrieval.json").read_text())
 
