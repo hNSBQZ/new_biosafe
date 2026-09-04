@@ -300,39 +300,55 @@ describe('App', () => {
     expect(screen.getByText('chunk-1')).toBeInTheDocument()
   })
 
-  it('shows history detail and saves a correction', async () => {
+  it('keeps history compact until a row is expanded and saves a manual annotation', async () => {
     window.history.replaceState({}, '', '/admin/history')
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: '记录与纠错' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '管理导航' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: '新冠活病毒培养需要什么实验室？' })).toBeInTheDocument()
+    await screen.findByText('新冠活病毒培养需要什么实验室？')
+    await waitFor(() => expect(screen.queryByText('加载中')).not.toBeInTheDocument())
+    const historyRow = screen.getByText('新冠活病毒培养需要什么实验室？').closest('button')!
+    expect(historyRow).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('2026/08/28')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看答案' })).not.toBeInTheDocument()
 
-    fireEvent.click(
-      screen.getAllByText('新冠活病毒培养需要什么实验室？')[0].closest('button')!,
-    )
+    fireEvent.click(historyRow)
+    expect(await screen.findByRole('button', { name: '查看答案' })).toBeInTheDocument()
+    expect(screen.getByText('新冠活病毒培养需要什么实验室？').closest('button')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /自动纠错/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '人工标注' }))
 
-    expect(await screen.findByText('系统回答')).toBeInTheDocument()
-    const textarea = screen.getByLabelText('纠错内容')
+    expect(screen.getByRole('dialog', { name: '编辑人工标注' })).toBeInTheDocument()
+    const textarea = screen.getByLabelText('人工标注内容')
     fireEvent.change(textarea, { target: { value: '人工纠错答案' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存人工标注' }))
 
-    expect(await screen.findByText('人工纠错答案')).toBeInTheDocument()
-    expect(screen.getByText('2026-08-28T10:00:00Z')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '修改人工标注' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看答案' }))
+    expect(screen.getByRole('dialog', { name: '查看答案' })).toBeInTheDocument()
+    expect(screen.getByText('人工纠错答案')).toBeInTheDocument()
+    expect(screen.getAllByText(/2026\/08\/28/).length).toBeGreaterThan(0)
   })
 
   it('shows the model correction and only adopts it into the manual editor', async () => {
     window.history.replaceState({}, '', '/admin/history')
     render(<App />)
 
+    await screen.findByText('新冠活病毒培养需要什么实验室？')
+    await waitFor(() => expect(screen.queryByText('加载中')).not.toBeInTheDocument())
+    const historyRow = screen.getByText('新冠活病毒培养需要什么实验室？').closest('button')!
+    fireEvent.click(historyRow)
+    fireEvent.click(await screen.findByRole('button', { name: /自动纠错/ }))
     expect(await screen.findByText('模型复核建议：应在生物安全三级实验室进行。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /生物安全标准/ })).toHaveAttribute(
       'href',
       'https://example.test/standard',
     )
-    fireEvent.click(screen.getByRole('button', { name: '采用模型建议' }))
+    fireEvent.click(screen.getByRole('button', { name: '用于人工标注' }))
 
-    expect(screen.getByLabelText('纠错内容')).toHaveValue(
+    expect(screen.getByRole('dialog', { name: '编辑人工标注' })).toBeInTheDocument()
+    expect(screen.getByLabelText('人工标注内容')).toHaveValue(
       '模型复核建议：应在生物安全三级实验室进行。',
     )
     const patchCalls = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PATCH')
@@ -343,7 +359,12 @@ describe('App', () => {
     window.history.replaceState({}, '', '/admin/history')
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '重新修正' }))
+    await screen.findByText('新冠活病毒培养需要什么实验室？')
+    await waitFor(() => expect(screen.queryByText('加载中')).not.toBeInTheDocument())
+    const historyRow = screen.getByText('新冠活病毒培养需要什么实验室？').closest('button')!
+    fireEvent.click(historyRow)
+    fireEvent.click(await screen.findByRole('button', { name: /自动纠错/ }))
+    fireEvent.click(screen.getByRole('button', { name: '重新纠错' }))
 
     expect(await screen.findByText('等待中')).toBeInTheDocument()
   })

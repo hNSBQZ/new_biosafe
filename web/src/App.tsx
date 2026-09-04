@@ -4,18 +4,22 @@ import {
   Activity,
   Bot,
   BookOpen,
+  CalendarDays,
   CheckCircle2,
   ChevronRight,
   Clock3,
+  Eye,
   FileText,
   History,
   Keyboard,
   Mic,
   MessageSquareText,
+  PencilLine,
   RefreshCw,
   ScanSearch,
   Send,
   Settings2,
+  Sparkles,
   Square,
   UserRound,
   Volume2,
@@ -31,6 +35,7 @@ type TurnInputMode = 'text' | 'voice'
 type TurnStatus = 'recording' | 'sending' | 'completed' | 'failed' | 'cancelled'
 type AnswerSource = '' | 'instruction' | 'direct' | 'rag' | 'error'
 type VoicePlayback = 'none' | 'buffering' | 'playing' | 'completed' | 'failed'
+type HistoryDialog = 'answer' | 'auto-correction' | 'manual-correction' | null
 type JsonRecord = Record<string, unknown>
 
 type ExperimentItem = {
@@ -208,6 +213,7 @@ export function App() {
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null)
   const selectedHistoryIdRef = useRef<number | null>(null)
   const [selectedHistory, setSelectedHistory] = useState<HistoryItem | null>(null)
+  const [historyDialog, setHistoryDialog] = useState<HistoryDialog>(null)
   const [historyCorrection, setHistoryCorrection] = useState('')
   const [savingCorrection, setSavingCorrection] = useState(false)
   const [queueingCorrection, setQueueingCorrection] = useState(false)
@@ -272,12 +278,6 @@ export function App() {
   }, [experimentLoaded, experiments])
 
   useEffect(() => {
-    if (!selectedHistoryId && historyPageData.items.length > 0) {
-      setSelectedHistoryId(historyPageData.items[0].id)
-    }
-  }, [historyPageData.items, selectedHistoryId])
-
-  useEffect(() => {
     if (selectedHistoryId === null) {
       setSelectedHistory(null)
       setHistoryCorrection('')
@@ -285,12 +285,6 @@ export function App() {
     }
     void loadHistoryDetail(selectedHistoryId)
   }, [selectedHistoryId])
-
-  useEffect(() => {
-    if (selectedHistory) {
-      setHistoryCorrection(selectedHistory.corrected_answer || selectedHistory.system_answer)
-    }
-  }, [selectedHistory])
 
   useEffect(() => {
     const historyId = selectedHistoryId
@@ -315,6 +309,24 @@ export function App() {
       controller.abort()
     }
   }, [selectedHistoryId, selectedHistory?.auto_correction?.status])
+
+  useEffect(() => {
+    if (!historyDialog) {
+      return
+    }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && !savingCorrection && !queueingCorrection) {
+        setHistoryDialog(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [historyDialog, queueingCorrection, savingCorrection])
 
   useEffect(() => {
     return () => {
@@ -373,13 +385,15 @@ export function App() {
       }
       const payload = (await response.json()) as HistoryPage
       setHistoryPageData(payload)
-      if (payload.items.length > 0) {
+      if (payload.items.length > 0 && selectedHistoryIdRef.current !== null) {
         const stillVisible = payload.items.some((item) => item.id === selectedHistoryIdRef.current)
         if (!stillVisible) {
-          setSelectedHistoryId(payload.items[0].id)
+          setSelectedHistoryId(null)
+          setHistoryDialog(null)
         }
       } else {
         setSelectedHistoryId(null)
+        setHistoryDialog(null)
       }
     } catch (error) {
       setHistoryPageData({ items: [], total: 0, page: historyPage, page_size: historyPageSize })
@@ -410,10 +424,32 @@ export function App() {
   async function loadHistoryDetail(historyId: number) {
     try {
       const payload = await fetchHistoryDetail(historyId)
-      setSelectedHistory(payload)
+      if (selectedHistoryIdRef.current === historyId) {
+        setSelectedHistory(payload)
+      }
     } catch (error) {
       setGlobalNotice(`历史详情加载失败：${describeError(error)}`)
     }
+  }
+
+  function toggleHistoryItem(item: HistoryItem) {
+    if (selectedHistoryId === item.id) {
+      selectedHistoryIdRef.current = null
+      setSelectedHistoryId(null)
+      setHistoryDialog(null)
+      return
+    }
+    selectedHistoryIdRef.current = item.id
+    setSelectedHistoryId(item.id)
+    setSelectedHistory(item)
+  }
+
+  function openHistoryDialog(item: HistoryItem, dialog: Exclude<HistoryDialog, null>) {
+    selectedHistoryIdRef.current = item.id
+    setSelectedHistoryId(item.id)
+    setSelectedHistory(item)
+    setHistoryCorrection(item.corrected_answer || item.system_answer)
+    setHistoryDialog(dialog)
   }
 
   async function enqueueAutoCorrection() {
@@ -466,7 +502,8 @@ export function App() {
         ...current,
         items: current.items.map((item) => (item.id === payload.id ? payload : item)),
       }))
-      setGlobalNotice('纠错已保存')
+      setGlobalNotice(historyCorrection.trim() ? '人工标注已保存' : '人工标注已清除')
+      setHistoryDialog(null)
     } catch (error) {
       setGlobalNotice(`纠错保存失败：${describeError(error)}`)
     } finally {
@@ -1487,9 +1524,9 @@ export function App() {
                         }}
                       >
                         <option value="">全部</option>
-                        <option value="completed">completed</option>
-                        <option value="failed">failed</option>
-                        <option value="cancelled">cancelled</option>
+                        <option value="completed">已完成</option>
+                        <option value="failed">已失败</option>
+                        <option value="cancelled">已取消</option>
                       </select>
                     </label>
                     <label className="inline-field">
@@ -1508,181 +1545,24 @@ export function App() {
                     </label>
                   </div>
                 </div>
-                <div className="history-layout">
-                  <div className="history-list">
-                    {historyLoading ? (
-                      <EmptyState icon={RefreshCw} title="加载中" text="正在读取历史记录。" />
-                    ) : historyPageData.items.length === 0 ? (
-                      <EmptyState icon={History} title="暂无记录" text="当前筛选条件下没有历史。" />
-                    ) : (
-                      historyPageData.items.map((item) => (
-                        <HistoryRow
-                          key={item.id}
-                          item={item}
-                          active={item.id === selectedHistoryId}
-                          onSelect={() => setSelectedHistoryId(item.id)}
-                          onOpenReference={(reference) => openReference(reference, 'history')}
-                        />
-                      ))
-                    )}
-                  </div>
-
-                  <div className="history-detail">
-                    {selectedHistory ? (
-                      <div className="detail-stack">
-                        <div className="detail-card">
-                          <div className="detail-meta">
-                            <Pill tone={historyTone(selectedHistory.status)}>
-                              {selectedHistory.status}
-                            </Pill>
-                            <Pill tone="neutral">{selectedHistory.answer_source}</Pill>
-                            <span className="detail-time">{selectedHistory.created_at}</span>
-                          </div>
-                          <h3>{selectedHistory.question}</h3>
-                          <div className="detail-grid">
-                            <div>
-                              <span className="mini-label">系统回答</span>
-                              <p>{selectedHistory.system_answer || '空'}</p>
-                            </div>
-                            <div>
-                              <span className="mini-label">纠错回答</span>
-                              <p>{selectedHistory.corrected_answer || '未填写'}</p>
-                            </div>
-                            <div>
-                              <span className="mini-label">实验</span>
-                              <p>{selectedHistory.experiment_id}</p>
-                            </div>
-                            <div>
-                              <span className="mini-label">错误</span>
-                              <p>{selectedHistory.error_code || '无'}</p>
-                            </div>
-                            <div>
-                              <span className="mini-label">纠错时间</span>
-                              <p>{selectedHistory.correction_updated_at || '未更新'}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="detail-card">
-                          <div className="panel-header slim">
-                            <div>
-                              <p className="panel-kicker">自动修正</p>
-                              <h2>模型复核</h2>
-                            </div>
-                            <div className="toolbar compact-toolbar">
-                              {selectedHistory.auto_correction ? (
-                                <Pill tone={correctionTone(selectedHistory.auto_correction.status)}>
-                                  {correctionStatusLabel(selectedHistory.auto_correction.status)}
-                                </Pill>
-                              ) : null}
-                              <button
-                                type="button"
-                                className="ghost-button"
-                                onClick={() => void enqueueAutoCorrection()}
-                                disabled={
-                                  queueingCorrection
-                                  || selectedHistory.auto_correction?.status === 'pending'
-                                  || selectedHistory.auto_correction?.status === 'running'
-                                  || selectedHistory.status !== 'completed'
-                                  || !['direct', 'rag'].includes(selectedHistory.answer_source)
-                                }
-                              >
-                                <RefreshCw aria-hidden="true" />
-                                {selectedHistory.auto_correction ? '重新修正' : '提交修正'}
-                              </button>
-                            </div>
-                          </div>
-                          {selectedHistory.auto_correction ? (
-                            <AutoCorrectionPanel
-                              correction={selectedHistory.auto_correction}
-                              onAdopt={(answer) => setHistoryCorrection(answer)}
-                            />
-                          ) : (
-                            <p className="correction-message">暂无模型修正记录</p>
-                          )}
-                        </div>
-
-                        <div className="detail-card">
-                          <div className="panel-header slim">
-                            <div>
-                              <p className="panel-kicker">纠错</p>
-                              <h2>编辑</h2>
-                            </div>
-                            <button
-                              type="button"
-                              className="ghost-button"
-                              onClick={() =>
-                                setHistoryCorrection(selectedHistory.system_answer)
-                              }
-                            >
-                              恢复系统答案
-                            </button>
-                          </div>
-                          <label className="field">
-                            <span>纠错内容</span>
-                            <textarea
-                              value={historyCorrection}
-                              onChange={(event) => setHistoryCorrection(event.target.value)}
-                              rows={5}
-                            />
-                          </label>
-                          <div className="toolbar">
-                            <button
-                              type="button"
-                              className="primary-button"
-                              onClick={() => void saveCorrection()}
-                              disabled={savingCorrection}
-                            >
-                              <CheckCircle2 aria-hidden="true" />
-                              保存
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button"
-                              onClick={() => {
-                                setHistoryCorrection(selectedHistory.corrected_answer)
-                              }}
-                            >
-                              <RefreshCw aria-hidden="true" />
-                              还原
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="detail-card">
-                          <div className="panel-header slim">
-                            <div>
-                              <p className="panel-kicker">引用</p>
-                              <h2>快照</h2>
-                            </div>
-                          </div>
-                          {selectedHistory.references.length === 0 ? (
-                            <EmptyState
-                              icon={FileText}
-                              title="无引用"
-                              text="这条历史没有可展开的引用。"
-                            />
-                          ) : (
-                            <div className="reference-list">
-                              {selectedHistory.references.map((reference) => (
-                                <ReferenceButton
-                                  key={`${reference.chunk_id}-${reference.citation_index ?? 0}`}
-                                  reference={reference}
-                                  onClick={() => openReference(reference, 'history')}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <EmptyState
-                        icon={FileText}
-                        title="选择一条记录"
-                        text="右侧会显示原始问题、系统回答、纠错和引用。"
+                <div className="history-list">
+                  {historyLoading ? (
+                    <EmptyState icon={RefreshCw} title="加载中" text="正在读取历史记录。" />
+                  ) : historyPageData.items.length === 0 ? (
+                    <EmptyState icon={History} title="暂无记录" text="当前筛选条件下没有历史。" />
+                  ) : (
+                    historyPageData.items.map((item) => (
+                      <HistoryRow
+                        key={item.id}
+                        item={item}
+                        expanded={item.id === selectedHistoryId}
+                        onToggle={() => toggleHistoryItem(item)}
+                        onOpenAnswer={() => openHistoryDialog(item, 'answer')}
+                        onOpenAutoCorrection={() => openHistoryDialog(item, 'auto-correction')}
+                        onOpenManualCorrection={() => openHistoryDialog(item, 'manual-correction')}
                       />
-                    )}
-                  </div>
+                    ))
+                  )}
                 </div>
                 <div className="pagination">
                   <button
@@ -1774,6 +1654,210 @@ export function App() {
 
         </div>
       </main>
+
+      {historyDialog && selectedHistory && (
+        <div
+          className="history-modal-backdrop"
+          role="presentation"
+          onMouseDown={() => {
+            if (!savingCorrection && !queueingCorrection) {
+              setHistoryDialog(null)
+            }
+          }}
+        >
+          <section
+            className="history-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-dialog-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="history-dialog-header">
+              <div>
+                <p className="panel-kicker">
+                  {historyDialog === 'answer'
+                    ? '回答详情'
+                    : historyDialog === 'auto-correction'
+                      ? '自动纠错'
+                      : '人工标注'}
+                </p>
+                <h2 id="history-dialog-title">
+                  {historyDialog === 'answer'
+                    ? '查看答案'
+                    : historyDialog === 'auto-correction'
+                      ? '模型复核'
+                      : '编辑人工标注'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setHistoryDialog(null)}
+                disabled={savingCorrection || queueingCorrection}
+                aria-label="关闭弹窗"
+                title="关闭"
+                autoFocus={historyDialog !== 'manual-correction'}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className="history-dialog-body">
+              <div className="history-dialog-question">
+                <span>问题</span>
+                <strong>{selectedHistory.question}</strong>
+              </div>
+
+              {historyDialog === 'answer' ? (
+                <>
+                  <div className="history-answer-meta">
+                    <Pill tone={historyTone(selectedHistory.status)}>
+                      {historyStatusLabel(selectedHistory.status)}
+                    </Pill>
+                    <span>{answerSourceText(selectedHistory.answer_source)}</span>
+                    <time dateTime={selectedHistory.created_at}>
+                      {formatHistoryDate(selectedHistory.created_at, true)}
+                    </time>
+                  </div>
+                  <div className="history-answer-section">
+                    <span className="mini-label">系统回答</span>
+                    <p>{selectedHistory.system_answer || '无系统回答'}</p>
+                  </div>
+                  {selectedHistory.corrected_answer ? (
+                    <div className="history-answer-section manual">
+                      <div className="history-answer-section-title">
+                        <span className="mini-label">人工标注</span>
+                        <Pill tone="success">已标注</Pill>
+                      </div>
+                      <p>{selectedHistory.corrected_answer}</p>
+                      {selectedHistory.correction_updated_at ? (
+                        <time dateTime={selectedHistory.correction_updated_at}>
+                          更新于 {formatHistoryDate(selectedHistory.correction_updated_at, true)}
+                        </time>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {selectedHistory.error_code ? (
+                    <div className="history-answer-error" role="alert">
+                      <strong>{selectedHistory.error_code}</strong>
+                      <span>{selectedHistory.error_message || '该次回答未完成'}</span>
+                    </div>
+                  ) : null}
+                  <div className="history-dialog-references">
+                    <span className="mini-label">引用来源（{selectedHistory.references.length}）</span>
+                    {selectedHistory.references.length > 0 ? (
+                      <div className="reference-list">
+                        {selectedHistory.references.map((reference) => (
+                          <ReferenceButton
+                            key={`${reference.chunk_id}-${reference.citation_index ?? 0}`}
+                            reference={reference}
+                            onClick={() => {
+                              setHistoryDialog(null)
+                              openReference(reference, 'history')
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="correction-message">这条记录没有引用快照</p>
+                    )}
+                  </div>
+                </>
+              ) : null}
+
+              {historyDialog === 'auto-correction' ? (
+                <>
+                  <div className="history-correction-toolbar">
+                    <div>
+                      <strong>模型复核结果</strong>
+                      <span>结果只供参考，不会自动替换人工标注</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => void enqueueAutoCorrection()}
+                      disabled={
+                        queueingCorrection
+                        || selectedHistory.auto_correction?.status === 'pending'
+                        || selectedHistory.auto_correction?.status === 'running'
+                        || selectedHistory.status !== 'completed'
+                        || !['direct', 'rag'].includes(selectedHistory.answer_source)
+                      }
+                    >
+                      <RefreshCw className={queueingCorrection ? 'spin' : ''} aria-hidden="true" />
+                      {selectedHistory.auto_correction ? '重新纠错' : '开始自动纠错'}
+                    </button>
+                  </div>
+                  {selectedHistory.auto_correction ? (
+                    <AutoCorrectionPanel
+                      correction={selectedHistory.auto_correction}
+                      onAdopt={(answer) => {
+                        setHistoryCorrection(answer)
+                        setHistoryDialog('manual-correction')
+                      }}
+                    />
+                  ) : (
+                    <div className="history-correction-empty">
+                      <Sparkles aria-hidden="true" />
+                      <p>还没有模型复核结果</p>
+                    </div>
+                  )}
+                </>
+              ) : null}
+
+              {historyDialog === 'manual-correction' ? (
+                <>
+                  <div className="history-system-answer-preview">
+                    <span className="mini-label">系统原回答</span>
+                    <p>{selectedHistory.system_answer || '无系统回答'}</p>
+                  </div>
+                  <label className="field history-correction-field">
+                    <span>人工标注内容</span>
+                    <textarea
+                      value={historyCorrection}
+                      onChange={(event) => setHistoryCorrection(event.target.value)}
+                      rows={8}
+                      autoFocus
+                    />
+                  </label>
+                  <div className="history-dialog-actions">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => setHistoryCorrection(selectedHistory.system_answer)}
+                      disabled={savingCorrection}
+                    >
+                      使用系统回答
+                    </button>
+                    <span className="history-dialog-action-spacer" />
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => setHistoryDialog(null)}
+                      disabled={savingCorrection}
+                    >
+                      暂不标注
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => void saveCorrection()}
+                      disabled={savingCorrection}
+                    >
+                      <CheckCircle2 aria-hidden="true" />
+                      {savingCorrection
+                        ? '正在保存'
+                        : historyCorrection.trim()
+                          ? '保存人工标注'
+                          : '清除人工标注'}
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      )}
 
       {currentReference && (
         <aside className="drawer" aria-label="引用详情">
@@ -1949,44 +2033,62 @@ export function TurnCard({
 
 function HistoryRow({
   item,
-  active,
-  onSelect,
-  onOpenReference,
+  expanded,
+  onToggle,
+  onOpenAnswer,
+  onOpenAutoCorrection,
+  onOpenManualCorrection,
 }: {
   item: HistoryItem
-  active: boolean
-  onSelect: () => void
-  onOpenReference: (reference: CitationReference) => void
+  expanded: boolean
+  onToggle: () => void
+  onOpenAnswer: () => void
+  onOpenAutoCorrection: () => void
+  onOpenManualCorrection: () => void
 }) {
   return (
-    <article className={active ? 'history-row active' : 'history-row'}>
-      <button type="button" className="history-row-main" onClick={onSelect}>
-        <div className="history-row-head">
-          <div className="history-row-title">
-            <Pill tone={historyTone(item.status)}>{item.status}</Pill>
-            <span>{item.question}</span>
-          </div>
-          <ChevronRight aria-hidden="true" />
+    <article className={expanded ? 'history-row expanded' : 'history-row'}>
+      <button
+        type="button"
+        className="history-row-main"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-controls={`history-actions-${item.id}`}
+      >
+        <div className="history-row-question">
+          <strong>{item.question}</strong>
         </div>
-        <div className="history-row-copy">
-          <p>{item.system_answer || '无系统回答'}</p>
-          <span>
-            {item.created_at} · {item.answer_source}
-          </span>
+        <div className="history-row-date">
+          <CalendarDays aria-hidden="true" />
+          <time dateTime={item.created_at}>{formatHistoryDate(item.created_at)}</time>
+          <ChevronRight className="history-row-chevron" aria-hidden="true" />
         </div>
       </button>
-      {item.references.length > 0 ? (
-        <div className="history-ref-strip">
-          {item.references.slice(0, 3).map((reference) => (
-            <button
-              key={`${reference.chunk_id}-${reference.citation_index ?? 0}`}
-              type="button"
-              className="mini-citation"
-              onClick={() => onOpenReference(reference)}
-            >
-              {reference.citation_index ? `[${reference.citation_index}]` : '[?]'}
+      {expanded ? (
+        <div className="history-row-actions" id={`history-actions-${item.id}`}>
+          <div className="history-row-status">
+            <Pill tone={historyTone(item.status)}>{historyStatusLabel(item.status)}</Pill>
+            <span>{answerSourceText(item.answer_source)}</span>
+          </div>
+          <div className="history-action-buttons">
+            <button type="button" className="ghost-button" onClick={onOpenAnswer}>
+              <Eye aria-hidden="true" />
+              查看答案
             </button>
-          ))}
+            <button type="button" className="ghost-button" onClick={onOpenAutoCorrection}>
+              <Sparkles aria-hidden="true" />
+              自动纠错
+              {item.auto_correction ? (
+                <span className={`history-action-status ${correctionTone(item.auto_correction.status)}`}>
+                  {correctionStatusLabel(item.auto_correction.status)}
+                </span>
+              ) : null}
+            </button>
+            <button type="button" className="primary-button" onClick={onOpenManualCorrection}>
+              <PencilLine aria-hidden="true" />
+              {item.corrected_answer ? '修改人工标注' : '人工标注'}
+            </button>
+          </div>
         </div>
       ) : null}
     </article>
@@ -2048,7 +2150,7 @@ function AutoCorrectionPanel({
             onClick={() => onAdopt(correction.answer)}
           >
             <CheckCircle2 aria-hidden="true" />
-            采用模型建议
+            用于人工标注
           </button>
         </>
       ) : null}
@@ -2292,6 +2394,39 @@ function historyTone(status: string) {
     return 'danger'
   }
   return 'neutral'
+}
+
+function historyStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    completed: '已完成',
+    failed: '已失败',
+    cancelled: '已取消',
+  }
+  return labels[status] || status
+}
+
+function answerSourceText(source: string) {
+  const labels: Record<string, string> = {
+    instruction: '实验指令',
+    direct: '直接回答',
+    rag: '知识库回答',
+    error: '回答失败',
+    seed: '历史导入',
+  }
+  return labels[source] || source || '未知路径'
+}
+
+function formatHistoryDate(value: string, includeTime = false) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value || '日期未知'
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    ...(includeTime ? { hour: '2-digit', minute: '2-digit' } : {}),
+  }).format(parsed)
 }
 
 function correctionTone(status: string) {
