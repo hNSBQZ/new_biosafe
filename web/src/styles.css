@@ -1286,6 +1286,50 @@ svg {
   opacity: 0;
 }
 
+.knowledge-duplicate-checking,
+.knowledge-duplicate-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.knowledge-duplicate-checking {
+  align-items: center;
+  color: #596760;
+  background: #f3f6f4;
+}
+
+.knowledge-duplicate-warning {
+  color: #764f08;
+  border: 1px solid #e4c878;
+  background: #fff9e8;
+}
+
+.knowledge-duplicate-checking > svg,
+.knowledge-duplicate-warning > svg {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+
+.knowledge-duplicate-warning > div {
+  min-width: 0;
+}
+
+.knowledge-duplicate-warning strong,
+.knowledge-duplicate-warning p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-duplicate-warning p {
+  margin-top: 3px;
+}
+
 .knowledge-dialog-actions {
   justify-content: flex-end;
 }

@@ -352,10 +352,9 @@ describe('App', () => {
     expect(screen.queryByText(/chunk/i)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '预览 生物安全管理条例.pdf' }))
-    expect(await screen.findByTitle('生物安全管理条例.pdf')).toHaveAttribute(
-      'src',
-      'blob:knowledge-preview',
-    )
+    const previewFrame = await screen.findByTitle('生物安全管理条例.pdf')
+    expect(previewFrame).toHaveAttribute('src', 'blob:knowledge-preview')
+    expect(previewFrame).not.toHaveAttribute('sandbox')
 
     fireEvent.change(screen.getByRole('combobox', { name: '类别' }), {
       target: { value: 'laws' },
@@ -371,6 +370,14 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '上传文件' }))
     expect(screen.getByRole('dialog', { name: '上传文件' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '资料类别' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/选择文件/), {
+      target: {
+        files: [new File(['duplicate'], '生物安全管理条例.pdf', { type: 'application/pdf' })],
+      },
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('同名文件已存在')
+    expect(screen.getByRole('alert')).toHaveTextContent('2026')
+    expect(screen.getByRole('button', { name: '上传' })).toBeDisabled()
   })
 
   it('redirects legacy management routes to the admin entry', async () => {

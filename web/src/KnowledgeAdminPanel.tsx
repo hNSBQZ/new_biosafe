@@ -62,6 +62,17 @@ type Props = {
   onNotice: (notice: string) => void
 }
 
+class AdminRequestError extends Error {
+  code: string
+  existing: KnowledgeFileItem | null
+
+  constructor(code: string, message: string, existing: KnowledgeFileItem | null = null) {
+    super(`${code}: ${message}`)
+    this.code = code
+    this.existing = existing
+  }
+}
+
 const STORAGE_KEY = 'biosafe-admin-token'
 const EMPTY_FILTERS: Filters = { name: '', category: '', status: '', dateFrom: '', dateTo: '' }
 const CATEGORIES: Array<{ value: KnowledgeCategory; label: string }> = [
@@ -94,6 +105,9 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadCategory, setUploadCategory] = useState<KnowledgeCategory>('laws')
   const [uploading, setUploading] = useState(false)
+  const [duplicateChecking, setDuplicateChecking] = useState(false)
+  const [duplicateFile, setDuplicateFile] = useState<KnowledgeFileItem | null>(null)
+  const [duplicateCheckError, setDuplicateCheckError] = useState('')
   const [preview, setPreview] = useState<PreviewState>(null)
   const [previewLoadingId, setPreviewLoadingId] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -199,6 +213,29 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
     setAppliedFilters(EMPTY_FILTERS)
   }, [])
 
+  const selectUploadFile = useCallback(async (file: File | null) => {
+    setUploadFile(file)
+    setDuplicateFile(null)
+    setDuplicateCheckError('')
+    if (!token || !file) return
+    setDuplicateChecking(true)
+    try {
+      const response = await adminFetch(
+        token,
+        `/api/admin/knowledge/files?name=${encodeURIComponent(file.name)}`,
+      )
+      const payload = await readJson<KnowledgeFilePage>(response)
+      const duplicate = payload.items.find(
+        (item) => item.name.normalize('NFKC').toLocaleLowerCase() === file.name.normalize('NFKC').toLocaleLowerCase(),
+      )
+      setDuplicateFile(duplicate ?? null)
+    } catch (error) {
+      setDuplicateCheckError(describeError(error))
+    } finally {
+      setDuplicateChecking(false)
+    }
+  }, [token])
+
   const uploadDocument = useCallback(async () => {
     if (!token || !uploadFile) return
     setUploading(true)
@@ -210,9 +247,14 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
       onNotice(`已上传 ${uploadFile.name}，正在解析`)
       setUploadOpen(false)
       setUploadFile(null)
+      setDuplicateFile(null)
+      setDuplicateCheckError('')
       if (fileInputRef.current) fileInputRef.current.value = ''
       await reloadFiles()
     } catch (error) {
+      if (error instanceof AdminRequestError && error.existing) {
+        setDuplicateFile(error.existing)
+      }
       onNotice(`上传失败：${describeError(error)}`)
     } finally {
       setUploading(false)
@@ -285,7 +327,16 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
           </span>
           {authReady ? (
             <>
-              <button type="button" className="primary-button" onClick={() => setUploadOpen(true)}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  setUploadFile(null)
+                  setDuplicateFile(null)
+                  setDuplicateCheckError('')
+                  setUploadOpen(true)
+                }}
+              >
                 <Upload aria-hidden="true" />
                 上传文件
               </button>
@@ -536,11 +587,44 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
               <Upload aria-hidden="true" />
               <strong>{uploadFile?.name || '选择文件'}</strong>
               {uploadFile ? <span>{formatBytes(uploadFile.size)}</span> : null}
-              <input ref={fileInputRef} type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={(event) => void selectUploadFile(event.target.files?.[0] ?? null)}
+              />
             </label>
+            {duplicateChecking ? (
+              <div className="knowledge-duplicate-checking">
+                <LoaderCircle className="spin" aria-hidden="true" />
+                正在检查同名文件
+              </div>
+            ) : duplicateFile ? (
+              <div className="knowledge-duplicate-warning" role="alert">
+                <AlertCircle aria-hidden="true" />
+                <div>
+                  <strong>同名文件已存在</strong>
+                  <p>
+                    {formatDate(duplicateFile.created_at)} 已上传过 {duplicateFile.name} · {duplicateFile.category_label} · {duplicateFile.status_label}
+                  </p>
+                </div>
+              </div>
+            ) : duplicateCheckError ? (
+              <div className="knowledge-duplicate-warning" role="alert">
+                <AlertCircle aria-hidden="true" />
+                <div>
+                  <strong>无法完成同名检查</strong>
+                  <p>{duplicateCheckError}</p>
+                </div>
+              </div>
+            ) : null}
             <div className="knowledge-dialog-actions">
               <button type="button" className="ghost-button" onClick={() => setUploadOpen(false)} disabled={uploading}>取消</button>
-              <button type="button" className="primary-button" onClick={() => void uploadDocument()} disabled={!uploadFile || uploading}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void uploadDocument()}
+                disabled={!uploadFile || uploading || duplicateChecking || Boolean(duplicateFile) || Boolean(duplicateCheckError)}
+              >
                 {uploading ? <LoaderCircle className="spin" aria-hidden="true" /> : <Upload aria-hidden="true" />}
                 {uploading ? '上传中' : '上传'}
               </button>
@@ -567,6 +651,8 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
           </div>
           {preview.file.preview_kind === 'image' ? (
             <div className="knowledge-image-preview"><img src={preview.url} alt={preview.file.name} /></div>
+          ) : preview.file.preview_kind === 'pdf' ? (
+            <iframe src={preview.url} title={preview.file.name} />
           ) : (
             <iframe src={preview.url} title={preview.file.name} sandbox="" />
           )}
@@ -616,7 +702,8 @@ async function responseError(response: Response) {
   const detail = await response.json().catch(() => null)
   const code = typeof detail?.detail?.code === 'string' ? detail.detail.code : `http_${response.status}`
   const message = typeof detail?.detail?.message === 'string' ? detail.detail.message : `HTTP ${response.status}`
-  return new Error(`${code}: ${message}`)
+  const existing = detail?.detail?.existing as KnowledgeFileItem | undefined
+  return new AdminRequestError(code, message, existing ?? null)
 }
 
 async function readJson<T>(response: Response): Promise<T> {

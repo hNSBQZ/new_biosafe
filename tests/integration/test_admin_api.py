@@ -269,6 +269,47 @@ async def test_file_upload_creates_internal_category_dataset_and_starts_parse(
     assert seen == ["create_dataset", "upload_document", "start_parse"]
 
 
+@pytest.mark.asyncio
+async def test_file_upload_rejects_same_name_across_categories(tmp_path: Path) -> None:
+    writes: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/api/v1/datasets":
+            dataset = _dataset_payload(dataset_name="biosafe-dev-naive", dataset_id="naive-1")
+            dataset["chunk_method"] = "naive"
+            return httpx.Response(200, json={"code": 0, "data": [dataset]})
+        if request.method == "GET" and request.url.path.endswith("/documents"):
+            document = _document_payload()
+            document["knowledgebase_id"] = "naive-1"
+            document["name"] = "GB_19489-2007.pdf"
+            return httpx.Response(200, json={"code": 0, "data": [document]})
+        if request.method == "POST":
+            writes.append(request.url.path)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = _app(tmp_path, handler)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        login = await client.post(
+            "/api/admin/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        response = await client.post(
+            "/api/admin/knowledge/files",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+            data={"category": "laws"},
+            files={"file": ("gb_19489-2007.PDF", b"duplicate", "application/pdf")},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "duplicate_knowledge_file"
+    assert detail["existing"]["name"] == "GB_19489-2007.pdf"
+    assert detail["existing"]["category_label"] == "通用资料"
+    assert "dataset" not in str(detail["existing"]).lower()
+    assert writes == []
+
+
 def _app(tmp_path: Path, handler) -> object:
     settings = Settings(
         database_path=tmp_path / "api.db",

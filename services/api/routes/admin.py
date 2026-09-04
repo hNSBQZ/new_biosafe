@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import tempfile
+import unicodedata
 from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -172,11 +173,36 @@ async def upload_knowledge_file(
     _: str = Depends(_require_admin),
 ) -> KnowledgeFilePage:
     method = _require_category(category)
+    upload_name = Path(file.filename or "upload").name
     client: RAGFlowClient = request.app.state.ragflow_client
     temp_path: Path | None = None
     try:
-        datasets = await _managed_datasets(client, method)
-        dataset = _select_upload_dataset(datasets, method)
+        managed_datasets = await _managed_datasets(client)
+        document_groups = await asyncio.gather(
+            *(client.list_documents(dataset.id, page_size=100) for dataset in managed_datasets)
+        )
+        duplicate = next(
+            (
+                _file_item(document, dataset.chunk_method)
+                for dataset, documents in zip(managed_datasets, document_groups, strict=True)
+                for document in documents
+                if _filename_key(document.name) == _filename_key(upload_name)
+            ),
+            None,
+        )
+        if duplicate is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "duplicate_knowledge_file",
+                    "message": "A file with the same name has already been uploaded",
+                    "existing": duplicate.model_dump(mode="json"),
+                },
+            )
+        category_datasets = [
+            dataset for dataset in managed_datasets if dataset.chunk_method == method
+        ]
+        dataset = _select_upload_dataset(category_datasets, method)
         if dataset is None:
             dataset = await client.create_dataset(
                 f"{DEV_DATASET_PREFIX}{method}",
@@ -185,14 +211,14 @@ async def upload_knowledge_file(
             )
         with tempfile.NamedTemporaryFile(
             delete=False,
-            suffix=Path(file.filename or "upload").suffix,
+            suffix=Path(upload_name).suffix,
         ) as tmp:
             tmp.write(await file.read())
             temp_path = Path(tmp.name)
         documents = await client.upload_document(
             dataset.id,
             temp_path,
-            filename=file.filename or temp_path.name,
+            filename=upload_name,
             content_type=file.content_type,
         )
         if documents:
@@ -657,6 +683,10 @@ def _parse_document_date(value: str | None) -> date | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
     except ValueError:
         return None
+
+
+def _filename_key(value: str) -> str:
+    return unicodedata.normalize("NFKC", Path(value).name).casefold()
 
 
 def _require_category(category: str) -> KnowledgeCategory:
