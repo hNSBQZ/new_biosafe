@@ -32,7 +32,15 @@ class Document:
     size: int = 0
     source_type: str = ""
     document_type: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
     raw_metadata: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True)
+class DownloadedDocument:
+    content: bytes
+    content_type: str = "application/octet-stream"
 
 
 @dataclass(frozen=True)

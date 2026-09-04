@@ -126,11 +126,33 @@ class KnowledgeDocumentItem(BaseModel):
     size: int = 0
     source_type: str = ""
     document_type: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
     raw_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class KnowledgeDocumentPage(BaseModel):
     items: list[KnowledgeDocumentItem]
+
+
+class KnowledgeFileItem(BaseModel):
+    id: str
+    name: str
+    category: Literal["laws", "manual", "table", "paper", "naive"]
+    category_label: str
+    status: Literal["uploaded", "parsing", "completed", "failed"]
+    status_label: str
+    progress: float | None = None
+    status_message: str = ""
+    size: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+    preview_kind: Literal["pdf", "image", "text", "download"] = "download"
+
+
+class KnowledgeFilePage(BaseModel):
+    items: list[KnowledgeFileItem]
+    total: int
 
 
 class KnowledgeChunkItem(BaseModel):

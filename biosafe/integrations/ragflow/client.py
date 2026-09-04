@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from biosafe.config import RAGFlowConfig
-from biosafe.integrations.ragflow.models import Dataset, Document, RetrievedChunk
+from biosafe.integrations.ragflow.models import (
+    Dataset,
+    Document,
+    DownloadedDocument,
+    RetrievedChunk,
+)
 
 
 class RAGFlowError(RuntimeError):
@@ -173,6 +179,33 @@ class RAGFlowClient:
             json={"ids": [document_id]},
         )
 
+    async def download_document(
+        self,
+        dataset_id: str,
+        document_id: str,
+    ) -> DownloadedDocument:
+        if not self.config.ready or self._client is None:
+            raise RAGFlowError("ragflow_not_configured", "RAGFlow is not configured")
+        try:
+            response = await self._client.get(
+                f"/api/v1/datasets/{dataset_id}/documents/{document_id}"
+            )
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise RAGFlowError("ragflow_timeout", "RAGFlow request timed out") from exc
+        except httpx.HTTPStatusError as exc:
+            raise RAGFlowError(
+                "ragflow_http_error", "RAGFlow request failed", exc.response.status_code
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise RAGFlowError("ragflow_unavailable", "RAGFlow response was unavailable") from exc
+        return DownloadedDocument(
+            content=response.content,
+            content_type=response.headers.get("content-type", "application/octet-stream").split(
+                ";", 1
+            )[0],
+        )
+
     async def start_parse(self, dataset_id: str, document_ids: list[str] | tuple[str, ...]) -> None:
         await self._request(
             "POST",
@@ -244,9 +277,7 @@ class RAGFlowClient:
             permission=str(item.get("permission") or ""),
             status=str(item.get("status") or item.get("run") or ""),
             parser_config=(
-                item["parser_config"]
-                if isinstance(item.get("parser_config"), dict)
-                else {}
+                item["parser_config"] if isinstance(item.get("parser_config"), dict) else {}
             ),
             raw_metadata=dict(item),
         )
@@ -265,6 +296,12 @@ class RAGFlowClient:
             size=int(item.get("size") or 0),
             source_type=str(item.get("source_type") or ""),
             document_type=str(item.get("type") or ""),
+            created_at=_normalize_timestamp(
+                item.get("create_time") or item.get("created_at") or item.get("create_date")
+            ),
+            updated_at=_normalize_timestamp(
+                item.get("update_time") or item.get("updated_at") or item.get("update_date")
+            ),
             raw_metadata=dict(item),
         )
 
@@ -279,9 +316,7 @@ class RAGFlowClient:
             pages = [pages]
         return RetrievedChunk(
             chunk_id=str(item.get("id") or item.get("chunk_id") or ""),
-            dataset_id=_first_text(
-                item, metadata, "dataset_id", "knowledgebase_id", "kb_id"
-            ),
+            dataset_id=_first_text(item, metadata, "dataset_id", "knowledgebase_id", "kb_id"),
             dataset_name=_first_text(item, metadata, "dataset_name", "knowledgebase_name"),
             document_id=str(item.get("document_id") or item.get("doc_id") or ""),
             document_name=_first_text(
@@ -328,3 +363,24 @@ def _guess_content_type(path: Path) -> str:
     if suffix in {".docx"}:
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return "application/octet-stream"
+
+
+def _normalize_timestamp(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)) or str(value).strip().isdigit():
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000
+        try:
+            return datetime.fromtimestamp(timestamp, UTC).isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.isoformat()

@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronRight,
+  AlertCircle,
+  CheckCircle2,
+  Download,
+  Eye,
   FileText,
+  FilterX,
+  LoaderCircle,
   LogIn,
-  Plus,
   RefreshCw,
   RotateCcw,
   Search,
@@ -13,88 +17,66 @@ import {
   X,
 } from 'lucide-react'
 
-type JsonRecord = Record<string, unknown>
+type KnowledgeCategory = 'laws' | 'manual' | 'table' | 'paper' | 'naive'
+type KnowledgeFileStatus = 'uploaded' | 'parsing' | 'completed' | 'failed'
 
-type KnowledgeDatasetItem = {
+type KnowledgeFileItem = {
   id: string
   name: string
-  chunk_method: string
-  document_count: number
-  embedding_model: string
-  permission: string
-  status: string
-  parser_config: JsonRecord
-  raw_metadata: JsonRecord
-}
-
-type KnowledgeDocumentItem = {
-  id: string
-  dataset_id: string
-  name: string
-  status: string
-  chunk_count: number
+  category: KnowledgeCategory
+  category_label: string
+  status: KnowledgeFileStatus
+  status_label: string
   progress: number | null
-  progress_message: string
-  location: string
+  status_message: string
   size: number
-  source_type: string
-  document_type: string
-  raw_metadata: JsonRecord
+  created_at: string | null
+  updated_at: string | null
+  preview_kind: 'pdf' | 'image' | 'text' | 'download'
 }
 
-type KnowledgeChunkItem = {
-  citation_index?: number | null
-  chunk_id: string
-  dataset_id: string
-  dataset_name: string
-  document_id: string
-  document_name: string
-  content: string
-  page_numbers: number[]
-  positions: Array<string | number | Record<string, unknown>>
-  image_id?: string | null
-  similarity?: number | null
-  vector_similarity?: number | null
-  term_similarity?: number | null
-  source_url?: string | null
-  raw_metadata?: JsonRecord
+type KnowledgeFilePage = {
+  items: KnowledgeFileItem[]
+  total: number
 }
 
 type AdminLoginResponse = {
   access_token: string
-  token_type: string
   username: string
-  expires_at: string
 }
 
-type DatasetPage = {
-  items: KnowledgeDatasetItem[]
+type Filters = {
+  name: string
+  category: '' | KnowledgeCategory
+  status: '' | KnowledgeFileStatus
+  dateFrom: string
+  dateTo: string
 }
 
-type DocumentPage = {
-  items: KnowledgeDocumentItem[]
-}
-
-type PreviewResponse = {
-  question: string
-  dataset_ids: string[]
-  chunks: KnowledgeChunkItem[]
-}
+type PreviewState = {
+  file: KnowledgeFileItem
+  url: string
+} | null
 
 type Props = {
   onNotice: (notice: string) => void
 }
 
 const STORAGE_KEY = 'biosafe-admin-token'
-const DEFAULT_PREVIEW_QUESTION = 'P4实验室穿什么防护服，需要戴口罩吗'
-
-const CHUNK_METHODS = [
-  { value: 'laws', label: 'laws' },
-  { value: 'manual', label: 'manual' },
-  { value: 'table', label: 'table' },
-  { value: 'paper', label: 'paper' },
-  { value: 'naive', label: 'naive' },
-] as const
+const EMPTY_FILTERS: Filters = { name: '', category: '', status: '', dateFrom: '', dateTo: '' }
+const CATEGORIES: Array<{ value: KnowledgeCategory; label: string }> = [
+  { value: 'laws', label: '法规标准' },
+  { value: 'manual', label: 'SOP 与设备手册' },
+  { value: 'table', label: '名录与表格' },
+  { value: 'paper', label: '论文与报告' },
+  { value: 'naive', label: '通用资料' },
+]
+const STATUSES: Array<{ value: KnowledgeFileStatus; label: string }> = [
+  { value: 'completed', label: '已完成' },
+  { value: 'uploaded', label: '已上传' },
+  { value: 'parsing', label: '解析中' },
+  { value: 'failed', label: '失败' },
+]
 
 export function KnowledgeAdminPanel({ onNotice }: Props) {
   const [token, setToken] = useState(() => loadToken())
@@ -103,73 +85,53 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [loggedInUsername, setLoggedInUsername] = useState('')
-
-  const [datasets, setDatasets] = useState<KnowledgeDatasetItem[]>([])
-  const [datasetsLoading, setDatasetsLoading] = useState(false)
-  const [selectedDatasetId, setSelectedDatasetId] = useState('')
-
-  const [documents, setDocuments] = useState<KnowledgeDocumentItem[]>([])
-  const [documentsLoading, setDocumentsLoading] = useState(false)
-  const [documentFile, setDocumentFile] = useState<File | null>(null)
-
-  const [datasetName, setDatasetName] = useState('')
-  const [chunkMethod, setChunkMethod] = useState<(typeof CHUNK_METHODS)[number]['value']>('laws')
-  const [savingDataset, setSavingDataset] = useState(false)
-
-  const [previewQuestion, setPreviewQuestion] = useState(DEFAULT_PREVIEW_QUESTION)
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [previewChunks, setPreviewChunks] = useState<KnowledgeChunkItem[]>([])
-
-  const selectedDataset = useMemo(
-    () => datasets.find((dataset) => dataset.id === selectedDatasetId) ?? null,
-    [datasets, selectedDatasetId],
-  )
+  const [files, setFiles] = useState<KnowledgeFileItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
+  const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadCategory, setUploadCategory] = useState<KnowledgeCategory>('laws')
+  const [uploading, setUploading] = useState(false)
+  const [preview, setPreview] = useState<PreviewState>(null)
+  const [previewLoadingId, setPreviewLoadingId] = useState('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const authReady = Boolean(token)
-  const reloadDatasets = useCallback(
-    async (preferredDatasetId = '') => {
-      if (!token) {
-        return
-      }
-      setDatasetsLoading(true)
-      try {
-        const payload = await fetchDatasets(token)
-        const items = payload.items ?? []
-        setDatasets(items)
-        const nextSelected =
-          preferredDatasetId && items.some((item) => item.id === preferredDatasetId)
-            ? preferredDatasetId
-            : items[0]?.id ?? ''
-        setSelectedDatasetId(nextSelected)
-        if (!nextSelected) {
-          setDocuments([])
-          setPreviewChunks([])
-        }
-      } catch (error) {
-        onNotice(`数据集加载失败：${describeError(error)}`)
-      } finally {
-        setDatasetsLoading(false)
-      }
-    },
-    [onNotice, token],
+  const hasActiveFilters = Object.values(appliedFilters).some(Boolean)
+  const parsingCount = useMemo(
+    () => files.filter((file) => file.status === 'parsing').length,
+    [files],
   )
-  const reloadDocuments = useCallback(
-    async (datasetId: string) => {
-      if (!token || !datasetId) {
-        return
-      }
-      setDocumentsLoading(true)
-      try {
-        const payload = await fetchDocuments(token, datasetId)
-        setDocuments(payload.items ?? [])
-      } catch (error) {
-        onNotice(`文档加载失败：${describeError(error)}`)
-      } finally {
-        setDocumentsLoading(false)
-      }
-    },
-    [onNotice, token],
+  const failedCount = useMemo(
+    () => files.filter((file) => file.status === 'failed').length,
+    [files],
   )
+
+  const reloadFiles = useCallback(async () => {
+    if (!token) {
+      return
+    }
+    setFilesLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (appliedFilters.name.trim()) params.set('name', appliedFilters.name.trim())
+      if (appliedFilters.category) params.set('category', appliedFilters.category)
+      if (appliedFilters.status) params.set('status', appliedFilters.status)
+      if (appliedFilters.dateFrom) params.set('date_from', appliedFilters.dateFrom)
+      if (appliedFilters.dateTo) params.set('date_to', appliedFilters.dateTo)
+      const suffix = params.size ? `?${params.toString()}` : ''
+      const response = await adminFetch(token, `/api/admin/knowledge/files${suffix}`)
+      const payload = await readJson<KnowledgeFilePage>(response)
+      setFiles(payload.items ?? [])
+      setTotal(payload.total ?? 0)
+    } catch (error) {
+      onNotice(`文件加载失败：${describeError(error)}`)
+    } finally {
+      setFilesLoading(false)
+    }
+  }, [appliedFilters, onNotice, token])
 
   useEffect(() => {
     if (!token) {
@@ -178,21 +140,24 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
       return
     }
     localStorage.setItem(STORAGE_KEY, token)
-    const timeoutId = window.setTimeout(() => {
-      void reloadDatasets()
-    }, 0)
+    const timeoutId = window.setTimeout(() => void reloadFiles(), 0)
     return () => window.clearTimeout(timeoutId)
-  }, [onNotice, reloadDatasets, token])
+  }, [onNotice, reloadFiles, token])
 
   useEffect(() => {
-    if (!token || !selectedDatasetId) {
+    if (!token || parsingCount === 0) {
       return
     }
-    const timeoutId = window.setTimeout(() => {
-      void reloadDocuments(selectedDatasetId)
-    }, 0)
-    return () => window.clearTimeout(timeoutId)
-  }, [reloadDocuments, selectedDatasetId, token])
+    const intervalId = window.setInterval(() => void reloadFiles(), 4000)
+    return () => window.clearInterval(intervalId)
+  }, [parsingCount, reloadFiles, token])
+
+  useEffect(
+    () => () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url)
+    },
+    [preview],
+  )
 
   const login = useCallback(async () => {
     setLoginLoading(true)
@@ -200,35 +165,12 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
     try {
       const response = await fetch('/api/admin/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: loginUsername,
-          password: loginPassword,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
       })
-      if (!response.ok) {
-        const detail = await response.json().catch(() => null)
-        const code =
-          typeof detail?.detail?.code === 'string' ? detail.detail.code : `http_${response.status}`
-        const message =
-          typeof detail?.detail?.message === 'string'
-            ? detail.detail.message
-            : typeof detail?.detail === 'string'
-              ? detail.detail
-              : `HTTP ${response.status}`
-        throw new Error(`${code}: ${message}`)
-      }
+      if (!response.ok) throw await responseError(response)
       const payload = await readJson<AdminLoginResponse>(response)
       setLoggedInUsername(payload.username)
-      setDatasets([])
-      setDocuments([])
-      setSelectedDatasetId('')
-      setPreviewChunks([])
-      setDocumentFile(null)
-      setDatasetName('')
-      setPreviewQuestion(DEFAULT_PREVIEW_QUESTION)
       setToken(payload.access_token)
       setLoginPassword('')
       onNotice('管理员登录成功')
@@ -241,178 +183,132 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
   }, [loginPassword, loginUsername, onNotice])
 
   const logout = useCallback(() => {
+    if (preview?.url) URL.revokeObjectURL(preview.url)
+    setPreview(null)
     setLoggedInUsername('')
-    setDatasets([])
-    setDocuments([])
-    setSelectedDatasetId('')
-    setPreviewChunks([])
-    setDocumentFile(null)
-    setDatasetName('')
-    setPreviewQuestion(DEFAULT_PREVIEW_QUESTION)
+    setFiles([])
+    setTotal(0)
     setToken('')
     setLoginError('')
     onNotice('管理员已退出')
-  }, [onNotice])
+  }, [onNotice, preview])
 
-  const refreshDatasets = useCallback(() => {
-    if (!token) {
-      return
-    }
-    void reloadDatasets(selectedDatasetId)
-  }, [reloadDatasets, selectedDatasetId, token])
-
-  const createDataset = useCallback(async () => {
-    if (!token || !datasetName.trim()) {
-      return
-    }
-    setSavingDataset(true)
-    try {
-      const response = await adminFetch(token, '/api/admin/knowledge/datasets', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: datasetName.trim(),
-          chunk_method: chunkMethod,
-        }),
-      })
-      const dataset = await readJson<KnowledgeDatasetItem>(response)
-      setDatasetName('')
-      onNotice(`已创建数据集 ${dataset.name}`)
-      await reloadDatasets(dataset.id)
-    } catch (error) {
-      onNotice(`创建数据集失败：${describeError(error)}`)
-    } finally {
-      setSavingDataset(false)
-    }
-  }, [chunkMethod, datasetName, onNotice, reloadDatasets, token])
-
-  const deleteDataset = useCallback(
-    async (dataset: KnowledgeDatasetItem) => {
-      if (!token || !window.confirm(`删除数据集 ${dataset.name}？`)) {
-        return
-      }
-      try {
-        await adminFetch(token, `/api/admin/knowledge/datasets/${dataset.id}`, {
-          method: 'DELETE',
-        })
-        onNotice(`已删除数据集 ${dataset.name}`)
-        await reloadDatasets(selectedDatasetId === dataset.id ? '' : selectedDatasetId)
-      } catch (error) {
-        onNotice(`删除数据集失败：${describeError(error)}`)
-      }
-    },
-    [onNotice, reloadDatasets, selectedDatasetId, token],
-  )
+  const applyFilters = useCallback(() => setAppliedFilters({ ...filters }), [filters])
+  const clearFilters = useCallback(() => {
+    setFilters(EMPTY_FILTERS)
+    setAppliedFilters(EMPTY_FILTERS)
+  }, [])
 
   const uploadDocument = useCallback(async () => {
-    if (!token || !selectedDatasetId || !documentFile) {
-      return
-    }
+    if (!token || !uploadFile) return
+    setUploading(true)
     try {
       const formData = new FormData()
-      formData.append('file', documentFile)
-      await adminFetch(token, `/api/admin/knowledge/datasets/${selectedDatasetId}/documents`, {
-        method: 'POST',
-        body: formData,
-      })
-      setDocumentFile(null)
-      onNotice(`已上传 ${documentFile.name}`)
-      await reloadDocuments(selectedDatasetId)
-      await reloadDatasets(selectedDatasetId)
+      formData.append('file', uploadFile)
+      formData.append('category', uploadCategory)
+      await adminFetch(token, '/api/admin/knowledge/files', { method: 'POST', body: formData })
+      onNotice(`已上传 ${uploadFile.name}，正在解析`)
+      setUploadOpen(false)
+      setUploadFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      await reloadFiles()
     } catch (error) {
       onNotice(`上传失败：${describeError(error)}`)
+    } finally {
+      setUploading(false)
     }
-  }, [documentFile, onNotice, reloadDatasets, reloadDocuments, selectedDatasetId, token])
+  }, [onNotice, reloadFiles, token, uploadCategory, uploadFile])
 
-  const parseDocument = useCallback(
-    async (document: KnowledgeDocumentItem, endpoint: 'parse' | 'retry' | 'cancel') => {
-      if (!token) {
+  const openPreview = useCallback(
+    async (file: KnowledgeFileItem) => {
+      if (!token) return
+      if (file.preview_kind === 'download') {
+        await downloadDocument(file, token, onNotice)
         return
       }
+      setPreviewLoadingId(file.id)
       try {
-        await adminFetch(
-          token,
-          `/api/admin/knowledge/datasets/${document.dataset_id}/documents/${document.id}/${endpoint}`,
-          { method: 'POST' },
-        )
-        onNotice(`${document.name} 已执行 ${endpoint}`)
-        await reloadDocuments(document.dataset_id)
-        await reloadDatasets(document.dataset_id)
+        const response = await adminFetch(token, `/api/admin/knowledge/files/${file.id}/content`)
+        const url = URL.createObjectURL(await response.blob())
+        setPreview((current) => {
+          if (current?.url) URL.revokeObjectURL(current.url)
+          return { file, url }
+        })
       } catch (error) {
-        onNotice(`${document.name} 操作失败：${describeError(error)}`)
+        onNotice(`预览失败：${describeError(error)}`)
+      } finally {
+        setPreviewLoadingId('')
       }
     },
-    [onNotice, reloadDatasets, reloadDocuments, token],
+    [onNotice, token],
+  )
+
+  const retryDocument = useCallback(
+    async (file: KnowledgeFileItem) => {
+      if (!token) return
+      try {
+        await adminFetch(token, `/api/admin/knowledge/files/${file.id}/retry`, { method: 'POST' })
+        onNotice(`${file.name} 已重新提交解析`)
+        await reloadFiles()
+      } catch (error) {
+        onNotice(`重试失败：${describeError(error)}`)
+      }
+    },
+    [onNotice, reloadFiles, token],
   )
 
   const deleteDocument = useCallback(
-    async (document: KnowledgeDocumentItem) => {
-      if (!token || !window.confirm(`删除文档 ${document.name}？`)) {
-        return
-      }
+    async (file: KnowledgeFileItem) => {
+      if (!token || !window.confirm(`删除文件 ${file.name}？`)) return
       try {
-        await adminFetch(
-          token,
-          `/api/admin/knowledge/datasets/${document.dataset_id}/documents/${document.id}`,
-          { method: 'DELETE' },
-        )
-        onNotice(`已删除文档 ${document.name}`)
-        await reloadDocuments(document.dataset_id)
-        await reloadDatasets(document.dataset_id)
+        await adminFetch(token, `/api/admin/knowledge/files/${file.id}`, { method: 'DELETE' })
+        if (preview?.file.id === file.id) setPreview(null)
+        onNotice(`已删除 ${file.name}`)
+        await reloadFiles()
       } catch (error) {
-        onNotice(`删除文档失败：${describeError(error)}`)
+        onNotice(`删除失败：${describeError(error)}`)
       }
     },
-    [onNotice, reloadDatasets, reloadDocuments, token],
+    [onNotice, preview, reloadFiles, token],
   )
 
-  const previewRetrieval = useCallback(async () => {
-    if (!token || !selectedDatasetId || !previewQuestion.trim()) {
-      return
-    }
-    setPreviewLoading(true)
-    try {
-      const response = await adminFetch(token, '/api/admin/knowledge/retrieval-preview', {
-        method: 'POST',
-        body: JSON.stringify({
-          question: previewQuestion.trim(),
-          dataset_ids: [selectedDatasetId],
-        }),
-      })
-      const payload = await readJson<PreviewResponse>(response)
-      setPreviewChunks(payload.chunks ?? [])
-      onNotice(`检索预览返回 ${payload.chunks?.length ?? 0} 个片段`)
-    } catch (error) {
-      onNotice(`检索预览失败：${describeError(error)}`)
-    } finally {
-      setPreviewLoading(false)
-    }
-  }, [onNotice, previewQuestion, selectedDatasetId, token])
-
   return (
-    <div className="admin-workbench">
+    <div className="admin-workbench knowledge-workbench">
       <div className="admin-header">
         <div className="admin-title">
-          <p className="panel-kicker">系统</p>
-          <h2>知识库管理</h2>
+          <p className="panel-kicker">资料中心</p>
+          <h2>知识库文件</h2>
         </div>
         <div className="admin-statusbar">
           <span className={authReady ? 'pill success' : 'pill warning'}>
             {authReady ? `已登录${loggedInUsername ? ` · ${loggedInUsername}` : ''}` : '未登录'}
           </span>
           {authReady ? (
-            <button type="button" className="ghost-button" onClick={logout}>
-              <X aria-hidden="true" />
-              退出
-            </button>
+            <>
+              <button type="button" className="primary-button" onClick={() => setUploadOpen(true)}>
+                <Upload aria-hidden="true" />
+                上传文件
+              </button>
+              <button type="button" className="ghost-button" onClick={logout}>
+                <X aria-hidden="true" />
+                退出
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => void reloadFiles()}
+                aria-label="刷新文件"
+                title="刷新"
+              >
+                <RefreshCw aria-hidden="true" />
+              </button>
+            </>
           ) : null}
-          <button type="button" className="icon-button" onClick={refreshDatasets} disabled={!authReady}>
-            <RefreshCw aria-hidden="true" />
-          </button>
         </div>
       </div>
 
       {!authReady ? (
-        <section className="admin-panel">
+        <section className="admin-panel knowledge-login">
           <div className="panel-header">
             <div>
               <p className="panel-kicker">登录</p>
@@ -431,6 +327,7 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
                 type="password"
                 value={loginPassword}
                 onChange={(event) => setLoginPassword(event.target.value)}
+                onKeyDown={(event) => event.key === 'Enter' && void login()}
               />
             </label>
           </div>
@@ -448,184 +345,160 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
               登录
             </button>
           </div>
-          {loginError ? (
-            <div className="turn-error admin-error">
-              <span className="mini-label">错误</span>
-              <p>{loginError}</p>
-            </div>
-          ) : null}
+          {loginError ? <div className="turn-error admin-error">{loginError}</div> : null}
         </section>
       ) : (
-        <div className="admin-grid">
-          <section className="admin-panel">
-            <div className="panel-header">
-              <div>
-                <p className="panel-kicker">数据集</p>
-                <h3>模板与状态</h3>
-              </div>
-              <button type="button" className="icon-button" onClick={() => void reloadDatasets(selectedDatasetId)}>
-                <RefreshCw aria-hidden="true" />
-              </button>
-            </div>
-            <div className="controls-grid">
-              <label className="field grow">
-                <span>数据集名</span>
+        <>
+          <section className="knowledge-filter-band" aria-label="文件筛选">
+            <label className="field knowledge-search-field">
+              <span>文件名</span>
+              <div className="input-with-icon">
+                <Search aria-hidden="true" />
                 <input
-                  value={datasetName}
-                  onChange={(event) => setDatasetName(event.target.value)}
-                  placeholder="biosafe-dev-..."
+                  value={filters.name}
+                  onChange={(event) => setFilters((current) => ({ ...current, name: event.target.value }))}
+                  onKeyDown={(event) => event.key === 'Enter' && applyFilters()}
+                  placeholder="搜索文件"
                 />
-              </label>
-              <label className="field">
-                <span>chunk method</span>
-                <select value={chunkMethod} onChange={(event) => setChunkMethod(event.target.value as typeof chunkMethod)}>
-                  {CHUNK_METHODS.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="toolbar">
+              </div>
+            </label>
+            <label className="field">
+              <span>类别</span>
+              <select
+                value={filters.category}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    category: event.target.value as Filters['category'],
+                  }))
+                }
+              >
+                <option value="">全部类别</option>
+                {CATEGORIES.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>状态</span>
+              <select
+                value={filters.status}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    status: event.target.value as Filters['status'],
+                  }))
+                }
+              >
+                <option value="">全部状态</option>
+                {STATUSES.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>开始日期</span>
+              <input
+                type="date"
+                value={filters.dateFrom}
+                onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>结束日期</span>
+              <input
+                type="date"
+                value={filters.dateTo}
+                onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
+              />
+            </label>
+            <div className="knowledge-filter-actions">
+              <button type="button" className="primary-button" onClick={applyFilters}>
+                <Search aria-hidden="true" />
+                筛选
+              </button>
               <button
                 type="button"
-                className="primary-button"
-                onClick={() => void createDataset()}
-                disabled={savingDataset || !datasetName.trim()}
+                className="icon-button"
+                onClick={clearFilters}
+                disabled={!hasActiveFilters && !Object.values(filters).some(Boolean)}
+                aria-label="清除筛选"
+                title="清除筛选"
               >
-                <Plus aria-hidden="true" />
-                创建
+                <FilterX aria-hidden="true" />
               </button>
-            </div>
-
-            <div className="admin-list" role="list" aria-label="数据集列表">
-              {datasetsLoading ? (
-                <div className="empty-state compact">
-                  <RefreshCw aria-hidden="true" />
-                  <h3>加载中</h3>
-                  <p>正在读取 RAGFlow 数据集。</p>
-                </div>
-              ) : datasets.length === 0 ? (
-                <div className="empty-state compact">
-                  <Shield aria-hidden="true" />
-                  <h3>暂无数据集</h3>
-                  <p>先创建一个开发数据集。</p>
-                </div>
-              ) : (
-                datasets.map((dataset) => (
-                  <div
-                    key={dataset.id}
-                    className={dataset.id === selectedDatasetId ? 'admin-list-row active' : 'admin-list-row'}
-                  >
-                    <button
-                      type="button"
-                      className="admin-list-main"
-                      onClick={() => setSelectedDatasetId(dataset.id)}
-                    >
-                      <div className="admin-list-head">
-                        <strong>{dataset.name}</strong>
-                        <ChevronRight aria-hidden="true" />
-                      </div>
-                      <p>
-                        {dataset.chunk_method} · {dataset.document_count} 文档 · {dataset.status || 'unknown'}
-                      </p>
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button admin-list-action"
-                      onClick={() => void deleteDataset(dataset)}
-                      aria-label={`删除 ${dataset.name}`}
-                    >
-                      <Trash2 aria-hidden="true" />
-                    </button>
-                  </div>
-                ))
-              )}
             </div>
           </section>
 
-          <section className="admin-panel">
-            <div className="panel-header">
-              <div>
-                <p className="panel-kicker">文档</p>
-                <h3>{selectedDataset?.name || '未选择数据集'}</h3>
+          <div className="knowledge-summary" aria-label="文件统计">
+            <span><strong>{total}</strong> 个文件</span>
+            <span><LoaderCircle aria-hidden="true" /> {parsingCount} 个解析中</span>
+            <span><AlertCircle aria-hidden="true" /> {failedCount} 个失败</span>
+          </div>
+
+          <section className="knowledge-file-panel">
+            <div className="knowledge-table" role="table" aria-label="知识库文件列表">
+              <div className="knowledge-table-head" role="row">
+                <span role="columnheader">文件</span>
+                <span role="columnheader">类别</span>
+                <span role="columnheader">上传时间</span>
+                <span role="columnheader">大小</span>
+                <span role="columnheader">状态</span>
+                <span role="columnheader">操作</span>
               </div>
-              <span className="pill neutral">{selectedDataset?.chunk_method || 'n/a'}</span>
-            </div>
-
-            <div className="controls-grid">
-              <label className="field grow">
-                <span>上传文件</span>
-                <input type="file" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} />
-              </label>
-            </div>
-            <div className="toolbar">
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => void uploadDocument()}
-                disabled={!selectedDatasetId || !documentFile}
-              >
-                <Upload aria-hidden="true" />
-                上传
-              </button>
-            </div>
-
-            <div className="admin-list" role="list" aria-label="文档列表">
-              {documentsLoading ? (
-                <div className="empty-state compact">
-                  <RefreshCw aria-hidden="true" />
-                  <h3>加载中</h3>
-                  <p>正在读取文档状态。</p>
+              {filesLoading ? (
+                <div className="knowledge-empty">
+                  <LoaderCircle className="spin" aria-hidden="true" />
+                  <span>正在加载文件</span>
                 </div>
-              ) : documents.length === 0 ? (
-                <div className="empty-state compact">
+              ) : files.length === 0 ? (
+                <div className="knowledge-empty">
                   <FileText aria-hidden="true" />
-                  <h3>暂无文档</h3>
-                  <p>上传后会显示解析状态。</p>
+                  <span>{hasActiveFilters ? '没有符合筛选条件的文件' : '暂无文件'}</span>
                 </div>
               ) : (
-                documents.map((document) => (
-                  <article key={document.id} className="admin-doc-row">
-                    <div className="admin-doc-copy">
-                      <div className="admin-doc-head">
-                        <strong>{document.name}</strong>
-                        <span className="pill neutral">{document.status}</span>
+                files.map((file) => (
+                  <article className="knowledge-file-row" role="row" key={file.id}>
+                    <div className="knowledge-file-name" role="cell">
+                      <FileText aria-hidden="true" />
+                      <div>
+                        <strong>{file.name}</strong>
+                        {file.status_message ? <small>{file.status_message}</small> : null}
                       </div>
-                      <p>
-                        {document.chunk_count} chunks · {document.progress_message || '等待状态'}
-                      </p>
                     </div>
-                    <div className="admin-doc-actions">
+                    <span role="cell" data-label="类别">{file.category_label}</span>
+                    <span role="cell" data-label="上传时间">{formatDate(file.created_at)}</span>
+                    <span role="cell" data-label="大小">{formatBytes(file.size)}</span>
+                    <div role="cell" data-label="状态">
+                      <StatusBadge file={file} />
+                    </div>
+                    <div className="knowledge-row-actions" role="cell">
                       <button
                         type="button"
                         className="icon-button"
-                        onClick={() => void parseDocument(document, 'parse')}
-                        title="解析"
+                        onClick={() => void openPreview(file)}
+                        disabled={previewLoadingId === file.id}
+                        aria-label={`${file.preview_kind === 'download' ? '下载' : '预览'} ${file.name}`}
+                        title={file.preview_kind === 'download' ? '下载' : '预览'}
                       >
-                        <RefreshCw aria-hidden="true" />
+                        {file.preview_kind === 'download' ? <Download aria-hidden="true" /> : <Eye aria-hidden="true" />}
                       </button>
+                      {(file.status === 'failed' || file.status === 'uploaded') ? (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={() => void retryDocument(file)}
+                          aria-label={`重试 ${file.name}`}
+                          title="重试解析"
+                        >
+                          <RotateCcw aria-hidden="true" />
+                        </button>
+                      ) : null}
                       <button
                         type="button"
-                        className="icon-button"
-                        onClick={() => void parseDocument(document, 'retry')}
-                        title="重试"
-                      >
-                        <RotateCcw aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        onClick={() => void parseDocument(document, 'cancel')}
-                        title="取消"
-                      >
-                        <X aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        onClick={() => void deleteDocument(document)}
+                        className="icon-button danger-action"
+                        onClick={() => void deleteDocument(file)}
+                        aria-label={`删除 ${file.name}`}
                         title="删除"
                       >
                         <Trash2 aria-hidden="true" />
@@ -635,74 +508,97 @@ export function KnowledgeAdminPanel({ onNotice }: Props) {
                 ))
               )}
             </div>
+          </section>
+        </>
+      )}
 
-            <div className="admin-preview">
-              <div className="panel-header slim">
-                <div>
-                  <p className="panel-kicker">预览</p>
-                  <h3>检索片段</h3>
-                </div>
+      {uploadOpen ? (
+        <div className="knowledge-modal-backdrop" role="presentation" onMouseDown={() => !uploading && setUploadOpen(false)}>
+          <section className="knowledge-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="panel-header">
+              <div>
+                <p className="panel-kicker">添加资料</p>
+                <h3 id="upload-title">上传文件</h3>
               </div>
-              <div className="controls-grid">
-                <label className="field grow">
-                  <span>问题</span>
-                  <textarea
-                    value={previewQuestion}
-                    onChange={(event) => setPreviewQuestion(event.target.value)}
-                    rows={3}
-                  />
-                </label>
-              </div>
-              <div className="toolbar">
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => void previewRetrieval()}
-                  disabled={previewLoading || !selectedDatasetId || !previewQuestion.trim()}
-                >
-                  <Search aria-hidden="true" />
-                  预览
-                </button>
-              </div>
-              {previewChunks.length === 0 ? (
-                <div className="empty-state compact">
-                  <Search aria-hidden="true" />
-                  <h3>等待预览</h3>
-                  <p>点击预览后展示检索片段。</p>
-                </div>
-              ) : (
-                <div className="preview-list">
-                  {previewChunks.map((chunk) => (
-                    <article key={chunk.chunk_id} className="preview-row">
-                      <div className="preview-row-head">
-                        <strong>{chunk.citation_index ? `[${chunk.citation_index}]` : '[?]'}</strong>
-                        <span>{chunk.document_name || chunk.chunk_id}</span>
-                      </div>
-                      <p>{chunk.content}</p>
-                      <div className="preview-row-foot">
-                        <span>{formatSimilarity(chunk)}</span>
-                        <span>{chunk.dataset_name || chunk.dataset_id}</span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
+              <button type="button" className="icon-button" onClick={() => setUploadOpen(false)} disabled={uploading} aria-label="关闭上传">
+                <X aria-hidden="true" />
+              </button>
+            </div>
+            <label className="field">
+              <span>资料类别</span>
+              <select value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value as KnowledgeCategory)}>
+                {CATEGORIES.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="knowledge-file-picker">
+              <Upload aria-hidden="true" />
+              <strong>{uploadFile?.name || '选择文件'}</strong>
+              {uploadFile ? <span>{formatBytes(uploadFile.size)}</span> : null}
+              <input ref={fileInputRef} type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
+            </label>
+            <div className="knowledge-dialog-actions">
+              <button type="button" className="ghost-button" onClick={() => setUploadOpen(false)} disabled={uploading}>取消</button>
+              <button type="button" className="primary-button" onClick={() => void uploadDocument()} disabled={!uploadFile || uploading}>
+                {uploading ? <LoaderCircle className="spin" aria-hidden="true" /> : <Upload aria-hidden="true" />}
+                {uploading ? '上传中' : '上传'}
+              </button>
             </div>
           </section>
         </div>
-      )}
+      ) : null}
+
+      {preview ? (
+        <aside className="knowledge-preview-drawer" aria-label="文件预览">
+          <div className="knowledge-preview-header">
+            <div>
+              <span>{preview.file.category_label}</span>
+              <h3>{preview.file.name}</h3>
+            </div>
+            <div className="knowledge-row-actions">
+              <button type="button" className="icon-button" onClick={() => void downloadDocument(preview.file, token, onNotice)} aria-label={`下载 ${preview.file.name}`} title="下载">
+                <Download aria-hidden="true" />
+              </button>
+              <button type="button" className="icon-button" onClick={() => setPreview(null)} aria-label="关闭文件预览" title="关闭">
+                <X aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          {preview.file.preview_kind === 'image' ? (
+            <div className="knowledge-image-preview"><img src={preview.url} alt={preview.file.name} /></div>
+          ) : (
+            <iframe src={preview.url} title={preview.file.name} sandbox="" />
+          )}
+        </aside>
+      ) : null}
     </div>
   )
 }
 
-async function fetchDatasets(token: string) {
-  const response = await adminFetch(token, '/api/admin/knowledge/datasets?include_parsing_status=true')
-  return await readJson<DatasetPage>(response)
+function StatusBadge({ file }: { file: KnowledgeFileItem }) {
+  const Icon = file.status === 'completed' ? CheckCircle2 : file.status === 'failed' ? AlertCircle : LoaderCircle
+  return (
+    <span className={`knowledge-status ${file.status}`}>
+      <Icon className={file.status === 'parsing' ? 'spin' : ''} aria-hidden="true" />
+      {file.status_label}
+      {file.status === 'parsing' && file.progress !== null ? ` ${Math.round(file.progress * 100)}%` : ''}
+    </span>
+  )
 }
 
-async function fetchDocuments(token: string, datasetId: string) {
-  const response = await adminFetch(token, `/api/admin/knowledge/datasets/${datasetId}/documents`)
-  return await readJson<DocumentPage>(response)
+async function downloadDocument(file: KnowledgeFileItem, token: string, onNotice: Props['onNotice']) {
+  try {
+    const response = await adminFetch(token, `/api/admin/knowledge/files/${file.id}/content?download=true`)
+    const url = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = file.name
+    anchor.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    onNotice(`下载失败：${describeError(error)}`)
+  }
 }
 
 async function adminFetch(token: string, path: string, init: RequestInit = {}) {
@@ -711,22 +607,16 @@ async function adminFetch(token: string, path: string, init: RequestInit = {}) {
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  const response = await fetch(path, {
-    ...init,
-    headers,
-  })
-  if (!response.ok) {
-    const detail = await response.json().catch(() => null)
-    const code = typeof detail?.detail?.code === 'string' ? detail.detail.code : `http_${response.status}`
-    const message =
-      typeof detail?.detail?.message === 'string'
-        ? detail.detail.message
-        : typeof detail?.detail === 'string'
-          ? detail.detail
-          : `HTTP ${response.status}`
-    throw new Error(`${code}: ${message}`)
-  }
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) throw await responseError(response)
   return response
+}
+
+async function responseError(response: Response) {
+  const detail = await response.json().catch(() => null)
+  const code = typeof detail?.detail?.code === 'string' ? detail.detail.code : `http_${response.status}`
+  const message = typeof detail?.detail?.message === 'string' ? detail.detail.message : `HTTP ${response.status}`
+  return new Error(`${code}: ${message}`)
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -734,20 +624,31 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 function loadToken() {
-  if (typeof window === 'undefined') {
-    return ''
-  }
+  if (typeof window === 'undefined') return ''
   return window.localStorage.getItem(STORAGE_KEY) ?? ''
 }
 
 function describeError(error: unknown) {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return '请求失败'
+  return error instanceof Error ? error.message : '请求失败'
 }
 
-function formatSimilarity(chunk: KnowledgeChunkItem) {
-  const value = chunk.similarity ?? chunk.vector_similarity ?? chunk.term_similarity
-  return value === undefined || value === null ? 'n/a' : value.toFixed(3)
+function formatDate(value: string | null) {
+  if (!value) return '未知'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed)
+}
+
+function formatBytes(size: number) {
+  if (!size) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1)
+  const value = size / 1024 ** index
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }

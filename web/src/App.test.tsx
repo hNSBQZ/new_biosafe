@@ -126,6 +126,21 @@ const chatSse = [
   '',
 ].join('\n')
 
+const knowledgeFile = {
+  id: 'doc-1',
+  name: '生物安全管理条例.pdf',
+  category: 'laws',
+  category_label: '法规标准',
+  status: 'completed',
+  status_label: '已完成',
+  progress: 1,
+  status_message: '',
+  size: 2048,
+  created_at: '2026-09-03T08:30:00Z',
+  updated_at: '2026-09-03T08:35:00Z',
+  preview_kind: 'pdf',
+}
+
 beforeEach(() => {
   window.history.replaceState({}, '', '/')
   vi.stubGlobal(
@@ -172,6 +187,17 @@ beforeEach(() => {
         )
       }
 
+      if (path === '/api/admin/knowledge/files' && method === 'GET') {
+        return jsonResponse({ items: [knowledgeFile], total: 1 })
+      }
+
+      if (path === '/api/admin/knowledge/files/doc-1/content' && method === 'GET') {
+        return new Response('%PDF fixture', {
+          status: 200,
+          headers: { 'Content-Type': 'application/pdf' },
+        })
+      }
+
       if (path === '/api/history/11/auto-correction' && method === 'POST') {
         return jsonResponse({
           ...historyItem.auto_correction,
@@ -195,12 +221,14 @@ beforeEach(() => {
     }),
   )
   window.sessionStorage.clear()
+  window.localStorage.clear()
 })
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
   window.sessionStorage.clear()
+  window.localStorage.clear()
   window.history.replaceState({}, '', '/')
 })
 
@@ -304,6 +332,45 @@ describe('App', () => {
     expect(screen.getByRole('heading', { level: 1, name: '知识库管理' })).toBeInTheDocument()
     expect(screen.getByText(/BIOSAFE_ADMIN_PASSWORD/)).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '问题' })).not.toBeInTheDocument()
+  })
+
+  it('shows a category-driven file center without dataset or chunk details', async () => {
+    window.history.replaceState({}, '', '/admin/knowledge')
+    window.localStorage.setItem('biosafe-admin-token', 'admin-token')
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:knowledge-preview'),
+      revokeObjectURL: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('生物安全管理条例.pdf')).toBeInTheDocument()
+    expect(screen.getAllByText('法规标准').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('已完成').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/dataset/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/chunk/i)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '预览 生物安全管理条例.pdf' }))
+    expect(await screen.findByTitle('生物安全管理条例.pdf')).toHaveAttribute(
+      'src',
+      'blob:knowledge-preview',
+    )
+
+    fireEvent.change(screen.getByRole('combobox', { name: '类别' }), {
+      target: { value: 'laws' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
+    await waitFor(() => {
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        expect.stringContaining('category=laws'),
+        expect.anything(),
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '上传文件' }))
+    expect(screen.getByRole('dialog', { name: '上传文件' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '资料类别' })).toBeInTheDocument()
   })
 
   it('redirects legacy management routes to the admin entry', async () => {

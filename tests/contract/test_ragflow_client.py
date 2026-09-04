@@ -125,6 +125,7 @@ async def test_create_upload_parse_and_delete_contract(tmp_path: Path) -> None:
                             "size": 12,
                             "source_type": "local",
                             "type": "doc",
+                            "create_time": 1_788_393_600,
                         }
                     ],
                 },
@@ -167,9 +168,30 @@ async def test_create_upload_parse_and_delete_contract(tmp_path: Path) -> None:
     assert dataset.id == "dataset-created"
     assert documents[0].dataset_id == "dataset-created"
     assert documents[0].status == "UNSTART"
+    assert documents[0].created_at == "2026-09-03T00:00:00+00:00"
     assert [item[0] for item in seen] == [
         "create_dataset",
         "upload_document",
         "start_parse",
         "delete_dataset",
     ]
+
+
+@pytest.mark.asyncio
+async def test_download_document_contract() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/datasets/dataset-1/documents/doc-1"
+        assert request.headers["authorization"] == "Bearer test-token"
+        return httpx.Response(
+            200,
+            content=b"%PDF fixture",
+            headers={"Content-Type": "application/pdf"},
+        )
+
+    config = RAGFlowConfig(base_url="http://ragflow.test", api_key="test-token")
+    async with RAGFlowClient(config, httpx.MockTransport(handler)) as client:
+        downloaded = await client.download_document("dataset-1", "doc-1")
+
+    assert downloaded.content == b"%PDF fixture"
+    assert downloaded.content_type == "application/pdf"

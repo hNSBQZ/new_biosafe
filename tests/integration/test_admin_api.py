@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from biosafe.config import AdminConfig, RAGFlowConfig, Settings
@@ -144,6 +145,130 @@ def test_admin_rejects_non_dev_namespace_writes(tmp_path: Path) -> None:
     assert seen == ["list_datasets"]
 
 
+@pytest.mark.asyncio
+async def test_admin_file_center_hides_datasets_and_proxies_original_file(tmp_path: Path) -> None:
+    seen: list[str] = []
+    app = _app(tmp_path, _ragflow_handler(seen))
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        login = await client.post(
+            "/api/admin/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        assert login.status_code == 200
+        token = str(login.json()["access_token"])
+        headers = {"Authorization": f"Bearer {token}"}
+
+        listed = await client.get(
+            "/api/admin/knowledge/files",
+            headers=headers,
+            params={
+                "category": "laws",
+                "status": "completed",
+                "date_from": "2026-09-01",
+                "date_to": "2026-09-04",
+            },
+        )
+        content = await client.get(
+            "/api/admin/knowledge/files/doc-1/content",
+            headers=headers,
+        )
+        uploaded = await client.post(
+            "/api/admin/knowledge/files",
+            headers=headers,
+            data={"category": "laws"},
+            files={"file": ("new.html", b"<html>new</html>", "text/html")},
+        )
+        retried = await client.post(
+            "/api/admin/knowledge/files/doc-1/retry",
+            headers=headers,
+        )
+        deleted = await client.delete(
+            "/api/admin/knowledge/files/doc-1",
+            headers=headers,
+        )
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    item = listed.json()["items"][0]
+    assert item == {
+        "id": "doc-1",
+        "name": "test.html",
+        "category": "laws",
+        "category_label": "法规标准",
+        "status": "completed",
+        "status_label": "已完成",
+        "progress": 1.0,
+        "status_message": "",
+        "size": 128,
+        "created_at": "2026-09-03T00:00:00+00:00",
+        "updated_at": "2026-09-03T01:00:00+00:00",
+        "preview_kind": "text",
+    }
+    assert "dataset" not in str(item).lower()
+    assert content.status_code == 200
+    assert content.content == b"<html><body>preview</body></html>"
+    assert content.headers["content-security-policy"] == "sandbox"
+    assert content.headers["content-disposition"].startswith("inline;")
+    assert uploaded.status_code == 200
+    assert uploaded.json()["items"][0]["category_label"] == "法规标准"
+    assert retried.status_code == 200
+    assert deleted.json() == {"ok": True}
+    assert "download_document" in seen
+    assert seen.count("start_parse") == 2
+
+
+@pytest.mark.asyncio
+async def test_file_upload_creates_internal_category_dataset_and_starts_parse(
+    tmp_path: Path,
+) -> None:
+    created = False
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal created
+        if request.method == "GET" and request.url.path == "/api/v1/datasets":
+            return httpx.Response(
+                200,
+                json={"code": 0, "data": [_dataset_payload()] if created else []},
+            )
+        if request.method == "POST" and request.url.path == "/api/v1/datasets":
+            body = json.loads(request.content)
+            assert body["name"] == "biosafe-dev-laws"
+            assert body["chunk_method"] == "laws"
+            created = True
+            seen.append("create_dataset")
+            return httpx.Response(200, json={"code": 0, "data": _dataset_payload()})
+        if request.method == "POST" and request.url.path.endswith("/documents"):
+            seen.append("upload_document")
+            return httpx.Response(200, json={"code": 0, "data": [_document_payload()]})
+        if request.method == "POST" and request.url.path.endswith("/chunks"):
+            assert json.loads(request.content) == {"document_ids": ["doc-1"]}
+            seen.append("start_parse")
+            return httpx.Response(200, json={"code": 0})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = _app(tmp_path, handler)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        login = await client.post(
+            "/api/admin/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        response = await client.post(
+            "/api/admin/knowledge/files",
+            headers=headers,
+            data={"category": "laws"},
+            files={"file": ("rule.html", b"<html>rule</html>", "text/html")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["category"] == "laws"
+    assert seen == ["create_dataset", "upload_document", "start_parse"]
+
+
 def _app(tmp_path: Path, handler) -> object:
     settings = Settings(
         database_path=tmp_path / "api.db",
@@ -216,6 +341,14 @@ def _ragflow_handler(
         if request.method == "GET" and request.url.path == documents_path:
             seen.append("list_documents")
             return httpx.Response(200, json={"code": 0, "data": [_document_payload()]})
+
+        if request.method == "GET" and request.url.path == f"{documents_path}/doc-1":
+            seen.append("download_document")
+            return httpx.Response(
+                200,
+                content=b"<html><body>preview</body></html>",
+                headers={"Content-Type": "text/html; charset=utf-8"},
+            )
 
         if request.method == "POST" and request.url.path == documents_path:
             seen.append("upload_document")
@@ -301,4 +434,7 @@ def _document_payload() -> dict[str, object]:
         "progress": 1.0,
         "progress_msg": "",
         "size": 128,
+        "type": "html",
+        "create_date": "2026-09-03T00:00:00Z",
+        "update_date": "2026-09-03T01:00:00Z",
     }
